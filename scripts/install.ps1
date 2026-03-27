@@ -110,8 +110,32 @@ if (Test-Path $configPath) {
 }
 
 # --- AWS Credentials ---
-Write-Step "AWS Credentials"
-Write-Host @"
+$reconfigureCreds = $true
+$defaultKeyId = if ($existingConfig) { $existingConfig.CloudPrint.AwsAccessKeyId } else { '' }
+$defaultSecret = if ($existingConfig) { $existingConfig.CloudPrint.AwsSecretAccessKey } else { '' }
+$defaultRegion = if ($existingConfig) { $existingConfig.CloudPrint.Region } else { '' }
+
+if ($defaultKeyId -and $defaultSecret -and $defaultRegion) {
+    $maskedKeyId = $defaultKeyId.Substring(0, [Math]::Min(8, $defaultKeyId.Length)) + '...'
+    Write-Step "Current AWS Configuration"
+    Write-Host ""
+    Write-Host "  Access Key:  $maskedKeyId"
+    Write-Host "  Region:      $defaultRegion"
+    Write-Host ""
+    $answer = Read-Host "  Reconfigure AWS credentials? [y/N]"
+    if ($answer -match '^[Yy]') {
+        $reconfigureCreds = $true
+    } else {
+        $reconfigureCreds = $false
+        $accessKeyId = $defaultKeyId
+        $secretPlain = $defaultSecret
+        $region = $defaultRegion
+    }
+}
+
+if ($reconfigureCreds) {
+    Write-Step "AWS Credentials"
+    Write-Host @"
 
   CloudPrint needs AWS credentials to access SQS.
   These should be scoped to SQS only — see the credentials guide:
@@ -119,62 +143,59 @@ Write-Host @"
 
 "@
 
-# Access Key ID
-$defaultKeyId = if ($existingConfig) { $existingConfig.CloudPrint.AwsAccessKeyId } else { '' }
-$maskedKeyId = if ($defaultKeyId) { $defaultKeyId.Substring(0, [Math]::Min(8, $defaultKeyId.Length)) + '...' } else { '' }
-if ($defaultKeyId) {
-    $accessKeyId = Read-Host "  AWS Access Key ID [$maskedKeyId]"
-    if ([string]::IsNullOrWhiteSpace($accessKeyId)) { $accessKeyId = $defaultKeyId }
-} else {
-    do {
-        $accessKeyId = Read-Host "  AWS Access Key ID"
-    } while ([string]::IsNullOrWhiteSpace($accessKeyId))
-}
-
-# Secret Access Key
-$defaultSecret = if ($existingConfig) { $existingConfig.CloudPrint.AwsSecretAccessKey } else { '' }
-$secretPrompt = if ($defaultSecret) { "  AWS Secret Access Key [keep existing]" } else { "  AWS Secret Access Key" }
-$secretAccessKey = Read-Host $secretPrompt -AsSecureString
-$secretPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secretAccessKey))
-
-if ([string]::IsNullOrWhiteSpace($secretPlain)) {
-    if ($defaultSecret) {
-        $secretPlain = $defaultSecret
-        Write-Host "  (Keeping existing secret)" -ForegroundColor DarkGray
+    # Access Key ID
+    $maskedKeyId = if ($defaultKeyId) { $defaultKeyId.Substring(0, [Math]::Min(8, $defaultKeyId.Length)) + '...' } else { '' }
+    if ($defaultKeyId) {
+        $accessKeyId = Read-Host "  AWS Access Key ID [$maskedKeyId]"
+        if ([string]::IsNullOrWhiteSpace($accessKeyId)) { $accessKeyId = $defaultKeyId }
     } else {
-        Write-Error "Secret Access Key is required."
-        exit 1
+        do {
+            $accessKeyId = Read-Host "  AWS Access Key ID"
+        } while ([string]::IsNullOrWhiteSpace($accessKeyId))
     }
-}
 
-# --- Region selection ---
-Write-Step "AWS Region"
+    # Secret Access Key
+    $secretPrompt = if ($defaultSecret) { "  AWS Secret Access Key [keep existing]" } else { "  AWS Secret Access Key" }
+    $secretAccessKey = Read-Host $secretPrompt -AsSecureString
+    $secretPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secretAccessKey))
 
-$defaultRegion = if ($existingConfig) { $existingConfig.CloudPrint.Region } else { '' }
+    if ([string]::IsNullOrWhiteSpace($secretPlain)) {
+        if ($defaultSecret) {
+            $secretPlain = $defaultSecret
+            Write-Host "  (Keeping existing secret)" -ForegroundColor DarkGray
+        } else {
+            Write-Error "Secret Access Key is required."
+            exit 1
+        }
+    }
 
-Write-Host ""
-foreach ($r in $AwsRegions) {
-    $marker = if ($r.Id -eq $defaultRegion) { ' *' } else { '' }
-    Write-Host ("  {0,2}) {1,-20} {2}{3}" -f $r.Num, $r.Id, $r.Name, $marker)
-}
-Write-Host ""
+    # Region selection
+    Write-Step "AWS Region"
 
-$regionInput = Read-Host "  Select region (1-$($AwsRegions.Count))$(if ($defaultRegion) { " [keep $defaultRegion]" } else { '' })"
+    Write-Host ""
+    foreach ($r in $AwsRegions) {
+        $marker = if ($r.Id -eq $defaultRegion) { ' *' } else { '' }
+        Write-Host ("  {0,2}) {1,-20} {2}{3}" -f $r.Num, $r.Id, $r.Name, $marker)
+    }
+    Write-Host ""
 
-if ([string]::IsNullOrWhiteSpace($regionInput) -and $defaultRegion) {
-    $region = $defaultRegion
-} else {
-    $regionNum = 0
-    if ([int]::TryParse($regionInput, [ref]$regionNum) -and $regionNum -ge 1 -and $regionNum -le $AwsRegions.Count) {
-        $region = ($AwsRegions | Where-Object { $_.Num -eq $regionNum }).Id
+    $regionInput = Read-Host "  Select region (1-$($AwsRegions.Count))$(if ($defaultRegion) { " [keep $defaultRegion]" } else { '' })"
+
+    if ([string]::IsNullOrWhiteSpace($regionInput) -and $defaultRegion) {
+        $region = $defaultRegion
     } else {
-        Write-Error "Invalid selection. Please enter a number between 1 and $($AwsRegions.Count)."
-        exit 1
+        $regionNum = 0
+        if ([int]::TryParse($regionInput, [ref]$regionNum) -and $regionNum -ge 1 -and $regionNum -le $AwsRegions.Count) {
+            $region = ($AwsRegions | Where-Object { $_.Num -eq $regionNum }).Id
+        } else {
+            Write-Error "Invalid selection. Please enter a number between 1 and $($AwsRegions.Count)."
+            exit 1
+        }
     }
-}
 
-Write-Host "  Selected: $region" -ForegroundColor Green
+    Write-Host "  Selected: $region" -ForegroundColor Green
+}
 
 # --- Verify credentials ---
 Write-Step "Verifying AWS credentials..."
@@ -189,7 +210,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "  Authenticated as: $verifyResult" -ForegroundColor Green
 
 # --- Printer selection ---
-Write-Step "Printer Selection"
+$defaultPrinter = if ($existingConfig) { $existingConfig.CloudPrint.PrinterName } else { '' }
+$reconfigurePrinter = $true
 
 $printers = @(Get-Printer | Select-Object -ExpandProperty Name)
 if ($printers.Count -eq 0) {
@@ -199,26 +221,38 @@ if ($printers.Count -eq 0) {
     exit 1
 }
 
-$defaultPrinter = if ($existingConfig) { $existingConfig.CloudPrint.PrinterName } else { '' }
-
-Write-Host ""
-for ($i = 0; $i -lt $printers.Count; $i++) {
-    $marker = if ($printers[$i] -eq $defaultPrinter) { ' *' } else { '' }
-    Write-Host ("  {0,2}) {1}{2}" -f ($i + 1), $printers[$i], $marker)
-}
-Write-Host ""
-
-$printerInput = Read-Host "  Select printer (1-$($printers.Count))$(if ($defaultPrinter) { " [keep $defaultPrinter]" } else { '' })"
-
-if ([string]::IsNullOrWhiteSpace($printerInput) -and $defaultPrinter) {
-    $selectedPrinter = $defaultPrinter
-} else {
-    $printerNum = 0
-    if ([int]::TryParse($printerInput, [ref]$printerNum) -and $printerNum -ge 1 -and $printerNum -le $printers.Count) {
-        $selectedPrinter = $printers[$printerNum - 1]
+if ($defaultPrinter -and ($printers -contains $defaultPrinter)) {
+    Write-Step "Current Printer: $defaultPrinter"
+    $answer = Read-Host "  Change printer? [y/N]"
+    if ($answer -match '^[Yy]') {
+        $reconfigurePrinter = $true
     } else {
-        Write-Error "Invalid selection. Please enter a number between 1 and $($printers.Count)."
-        exit 1
+        $reconfigurePrinter = $false
+        $selectedPrinter = $defaultPrinter
+    }
+}
+
+if ($reconfigurePrinter) {
+    Write-Step "Printer Selection"
+    Write-Host ""
+    for ($i = 0; $i -lt $printers.Count; $i++) {
+        $marker = if ($printers[$i] -eq $defaultPrinter) { ' *' } else { '' }
+        Write-Host ("  {0,2}) {1}{2}" -f ($i + 1), $printers[$i], $marker)
+    }
+    Write-Host ""
+
+    $printerInput = Read-Host "  Select printer (1-$($printers.Count))$(if ($defaultPrinter) { " [keep $defaultPrinter]" } else { '' })"
+
+    if ([string]::IsNullOrWhiteSpace($printerInput) -and $defaultPrinter) {
+        $selectedPrinter = $defaultPrinter
+    } else {
+        $printerNum = 0
+        if ([int]::TryParse($printerInput, [ref]$printerNum) -and $printerNum -ge 1 -and $printerNum -le $printers.Count) {
+            $selectedPrinter = $printers[$printerNum - 1]
+        } else {
+            Write-Error "Invalid selection. Please enter a number between 1 and $($printers.Count)."
+            exit 1
+        }
     }
 }
 
