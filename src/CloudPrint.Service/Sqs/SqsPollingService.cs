@@ -32,7 +32,8 @@ public class SqsPollingService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("CloudPrint service starting. Queue: {QueueUrl}", _options.QueueUrl);
+        _logger.LogInformation("CloudPrint service starting. Queue: {QueueUrl}, Printer: {PrinterName}",
+            _options.QueueUrl, _options.PrinterName);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -79,9 +80,13 @@ public class SqsPollingService : BackgroundService
                 return;
             }
 
+            var printerName = !string.IsNullOrWhiteSpace(job.PrinterName)
+                ? job.PrinterName
+                : _options.PrinterName;
+
             _logger.LogInformation(
                 "Processing print job {MessageId}: {ContentType} -> {PrinterName}",
-                message.MessageId, job.ContentType, job.PrinterName);
+                message.MessageId, job.ContentType, printerName);
 
             var tempFile = await _fileDownloader.DownloadAsync(job.FileUrl, stoppingToken);
             try
@@ -89,7 +94,7 @@ public class SqsPollingService : BackgroundService
                 var copies = Math.Max(1, job.Copies);
                 for (var i = 0; i < copies; i++)
                 {
-                    _printRouter.Print(tempFile, job.PrinterName, job.ContentType);
+                    _printRouter.Print(tempFile, printerName, job.ContentType);
                 }
 
                 await _sqsClient.DeleteMessageAsync(_options.QueueUrl, message.ReceiptHandle, stoppingToken);
@@ -102,8 +107,8 @@ public class SqsPollingService : BackgroundService
         }
         catch (PrinterNotFoundException ex)
         {
-            _logger.LogError(ex, "Printer not found for job {MessageId}: {PrinterName}. Message will go to DLQ",
-                message.MessageId, job?.PrinterName);
+            _logger.LogError(ex, "Printer not found for job {MessageId}. Message will go to DLQ",
+                message.MessageId);
         }
         catch (Exception ex)
         {

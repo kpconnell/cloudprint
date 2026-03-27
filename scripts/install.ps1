@@ -3,8 +3,8 @@
 .SYNOPSIS
     Installs or updates the CloudPrint Windows Service.
 .DESCRIPTION
-    Downloads the latest CloudPrint release, prompts for AWS credentials and region,
-    creates the SQS queue for this machine, and registers the Windows Service.
+    Downloads the latest CloudPrint release, prompts for AWS credentials, region,
+    and printer selection, creates the SQS queue, and registers the Windows Service.
 .PARAMETER Uninstall
     Removes the CloudPrint service and files.
 #>
@@ -100,6 +100,8 @@ if (-not (Test-Path $InstallDir)) {
 }
 Copy-Item "$tempExtract\*" $InstallDir -Recurse -Force
 
+$exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
+
 # --- Load existing config if upgrading ---
 $existingConfig = $null
 $configPath = Join-Path $InstallDir 'appsettings.json'
@@ -174,67 +176,79 @@ if ([string]::IsNullOrWhiteSpace($regionInput) -and $defaultRegion) {
 
 Write-Host "  Selected: $region" -ForegroundColor Green
 
-# --- Create SQS queue ---
-$hostname = $env:COMPUTERNAME.ToLower()
-$queueName = "cloudprint-$hostname"
+# --- Verify credentials ---
+Write-Step "Verifying AWS credentials..."
 
-Write-Step "Creating SQS queue '$queueName' in $region..."
+$verifyResult = & $exePath verify-creds $accessKeyId.Trim() $secretPlain $region 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Error "Invalid AWS credentials: $verifyResult"
+    exit 1
+}
 
-# Use the provided credentials to create the queue via AWS SDK in the service binary,
-# or fall back to AWS CLI if available. We'll use a simple .NET inline script.
-$env:AWS_ACCESS_KEY_ID = $accessKeyId.Trim()
-$env:AWS_SECRET_ACCESS_KEY = $secretPlain
-$env:AWS_DEFAULT_REGION = $region
+Write-Host "  Authenticated as: $verifyResult" -ForegroundColor Green
 
-# Try using AWS CLI if available
-$awsCli = Get-Command aws -ErrorAction SilentlyContinue
-if ($awsCli) {
-    $queueUrl = aws sqs create-queue --queue-name $queueName --region $region --output text --query 'QueueUrl' 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to create SQS queue: $queueUrl`n`nCheck that your credentials have SQS access."
-        exit 1
-    }
+# --- Printer selection ---
+Write-Step "Printer Selection"
+
+$printers = @(Get-Printer | Select-Object -ExpandProperty Name)
+if ($printers.Count -eq 0) {
+    Write-Host ""
+    Write-Host "  No printers found on this machine." -ForegroundColor Red
+    Write-Host "  Add a printer in Windows Settings and re-run this installer." -ForegroundColor Yellow
+    exit 1
+}
+
+$defaultPrinter = if ($existingConfig) { $existingConfig.CloudPrint.PrinterName } else { '' }
+
+Write-Host ""
+for ($i = 0; $i -lt $printers.Count; $i++) {
+    $marker = if ($printers[$i] -eq $defaultPrinter) { ' *' } else { '' }
+    Write-Host ("  {0,2}) {1}{2}" -f ($i + 1), $printers[$i], $marker)
+}
+Write-Host ""
+
+$printerInput = Read-Host "  Select printer (1-$($printers.Count))$(if ($defaultPrinter) { " [keep $defaultPrinter]" } else { '' })"
+
+if ([string]::IsNullOrWhiteSpace($printerInput) -and $defaultPrinter) {
+    $selectedPrinter = $defaultPrinter
 } else {
-    # Use the service exe to create the queue (it has the AWS SDK bundled)
-    # Fall back to constructing the URL if we can't create it
-    Write-Host "  AWS CLI not found. Attempting to create queue using service binary..." -ForegroundColor Yellow
-
-    # Try a simple HTTP call to SQS API
-    try {
-        # We'll construct the expected URL format and verify connectivity later
-        # For now, use Invoke-WebRequest with SQS Query API
-        Add-Type -AssemblyName System.Web
-        $stsUrl = "https://sqs.$region.amazonaws.com/"
-
-        # Use AWS SDK from the installed service to create queue
-        $exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
-        # Simpler: just tell the user to install AWS CLI
-        Write-Host ""
-        Write-Host "  The AWS CLI is needed to create the SQS queue." -ForegroundColor Yellow
-        Write-Host "  Install it from: https://aws.amazon.com/cli/" -ForegroundColor Yellow
-        Write-Host "  Then re-run this installer." -ForegroundColor Yellow
-        exit 1
-    }
-    catch {
-        Write-Error "Failed to create SQS queue. Please install the AWS CLI and re-run this installer."
+    $printerNum = 0
+    if ([int]::TryParse($printerInput, [ref]$printerNum) -and $printerNum -ge 1 -and $printerNum -le $printers.Count) {
+        $selectedPrinter = $printers[$printerNum - 1]
+    } else {
+        Write-Error "Invalid selection. Please enter a number between 1 and $($printers.Count)."
         exit 1
     }
 }
 
-# Clean up env vars
-Remove-Item Env:\AWS_ACCESS_KEY_ID -ErrorAction SilentlyContinue
-Remove-Item Env:\AWS_SECRET_ACCESS_KEY -ErrorAction SilentlyContinue
-Remove-Item Env:\AWS_DEFAULT_REGION -ErrorAction SilentlyContinue
+Write-Host "  Selected: $selectedPrinter" -ForegroundColor Green
 
-Write-Host "  Queue URL: $queueUrl" -ForegroundColor Green
+# --- Create SQS queue ---
+$hostname = $env:COMPUTERNAME.ToLower()
+$safePrinterName = ($selectedPrinter -replace '[^a-zA-Z0-9\-]', '-').ToLower().TrimEnd('-')
+$queueName = "cloudprint-$hostname-$safePrinterName"
 
-# --- Show printers ---
-Write-Step "Available printers on this machine:"
-$printers = Get-Printer | Select-Object Name, DriverName, PortName
-if ($printers.Count -eq 0) {
-    Write-Host "  (No printers found — you can add printers later)" -ForegroundColor Yellow
-} else {
-    $printers | Format-Table -AutoSize
+# SQS queue names max 80 chars
+if ($queueName.Length -gt 80) {
+    $queueName = $queueName.Substring(0, 80)
+}
+
+Write-Step "Creating SQS queue '$queueName'..."
+
+$queueUrl = & $exePath create-queue $queueName $accessKeyId.Trim() $secretPlain $region 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Error "Failed to create SQS queue: $queueUrl`n`nCheck that your credentials have sqs:CreateQueue permission on cloudprint-* queues."
+    exit 1
+}
+
+Write-Host "  Queue: $queueUrl" -ForegroundColor Green
+
+# --- Ensure log directory ---
+$logDir = "$env:ProgramData\CloudPrint\logs"
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
 
 # --- Write config ---
@@ -246,6 +260,7 @@ $config = @{
         Region = $region
         AwsAccessKeyId = $accessKeyId.Trim()
         AwsSecretAccessKey = $secretPlain
+        PrinterName = $selectedPrinter
         MaxConcurrentJobs = 1
         VisibilityTimeoutSeconds = 60
     }
@@ -262,7 +277,7 @@ $config = @{
             @{
                 Name = "File"
                 Args = @{
-                    path = "logs/cloudprint-.log"
+                    path = "C:\ProgramData\CloudPrint\logs\cloudprint-.log"
                     rollingInterval = "Day"
                     retainedFileCountLimit = 30
                 }
@@ -289,7 +304,6 @@ Write-Host "  Config file locked to Administrators and SYSTEM only" -ForegroundC
 # --- Register service ---
 Write-Step "Registering Windows Service..."
 
-$exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
 New-Service -Name $ServiceName `
     -BinaryPathName $exePath `
     -DisplayName 'CloudPrint' `
@@ -307,9 +321,10 @@ Write-Host @"
 
   Status:    $($svc.Status)
   Install:   $InstallDir
+  Printer:   $selectedPrinter
   Queue:     $queueName
   Region:    $region
-  Logs:      $InstallDir\logs\
+  Logs:      C:\ProgramData\CloudPrint\logs\
 
   To reconfigure, run this installer again.
 
