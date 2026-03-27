@@ -1,0 +1,320 @@
+#Requires -RunAsAdministrator
+<#
+.SYNOPSIS
+    Installs or updates the CloudPrint Windows Service.
+.DESCRIPTION
+    Downloads the latest CloudPrint release, prompts for AWS credentials and region,
+    creates the SQS queue for this machine, and registers the Windows Service.
+.PARAMETER Uninstall
+    Removes the CloudPrint service and files.
+#>
+param(
+    [switch]$Uninstall
+)
+
+$ErrorActionPreference = 'Stop'
+$ServiceName = 'CloudPrint'
+$InstallDir = "$env:ProgramFiles\CloudPrint"
+$RepoOwner = 'kpconnell'
+$RepoName = 'cloudprint'
+
+$AwsRegions = @(
+    @{ Num = 1;  Id = 'us-east-1';      Name = 'US East (N. Virginia)' }
+    @{ Num = 2;  Id = 'us-east-2';      Name = 'US East (Ohio)' }
+    @{ Num = 3;  Id = 'us-west-1';      Name = 'US West (N. California)' }
+    @{ Num = 4;  Id = 'us-west-2';      Name = 'US West (Oregon)' }
+    @{ Num = 5;  Id = 'ca-central-1';   Name = 'Canada (Central)' }
+    @{ Num = 6;  Id = 'eu-west-1';      Name = 'Europe (Ireland)' }
+    @{ Num = 7;  Id = 'eu-west-2';      Name = 'Europe (London)' }
+    @{ Num = 8;  Id = 'eu-central-1';   Name = 'Europe (Frankfurt)' }
+    @{ Num = 9;  Id = 'ap-southeast-1'; Name = 'Asia Pacific (Singapore)' }
+    @{ Num = 10; Id = 'ap-southeast-2'; Name = 'Asia Pacific (Sydney)' }
+    @{ Num = 11; Id = 'ap-northeast-1'; Name = 'Asia Pacific (Tokyo)' }
+)
+
+function Write-Step($message) {
+    Write-Host "`n>> $message" -ForegroundColor Cyan
+}
+
+function Stop-ExistingService {
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -eq 'Running') {
+            Write-Step "Stopping existing CloudPrint service..."
+            Stop-Service -Name $ServiceName -Force
+            Start-Sleep -Seconds 2
+        }
+        Write-Step "Removing existing service registration..."
+        sc.exe delete $ServiceName | Out-Null
+        Start-Sleep -Seconds 1
+    }
+}
+
+# --- Uninstall ---
+if ($Uninstall) {
+    Write-Step "Uninstalling CloudPrint..."
+    Stop-ExistingService
+    if (Test-Path $InstallDir) {
+        Remove-Item $InstallDir -Recurse -Force
+        Write-Host "Removed $InstallDir" -ForegroundColor Green
+    }
+    Write-Host "`nCloudPrint has been uninstalled." -ForegroundColor Green
+    exit 0
+}
+
+Write-Host @"
+
+   _____ _                 _ _____      _       _
+  / ____| |               | |  __ \    (_)     | |
+ | |    | | ___  _   _  __| | |__) | __ _ _ __ | |_
+ | |    | |/ _ \| | | |/ _`` |  ___/ '__| | '_ \| __|
+ | |____| | (_) | |_| | (_| | |   | |  | | | | | |_
+  \_____|_|\___/ \__,_|\__,_|_|   |_|  |_|_| |_|\__|
+
+"@ -ForegroundColor Cyan
+
+# --- Download latest release ---
+Write-Step "Downloading latest release..."
+$releaseInfo = Invoke-RestMethod "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+$zipAsset = $releaseInfo.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
+
+if (-not $zipAsset) {
+    Write-Error "No release zip found. Please check https://github.com/$RepoOwner/$RepoName/releases"
+    exit 1
+}
+
+$tempZip = Join-Path $env:TEMP "cloudprint-latest.zip"
+$tempExtract = Join-Path $env:TEMP "cloudprint-extract"
+
+Invoke-WebRequest -Uri $zipAsset.browser_download_url -OutFile $tempZip
+if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
+Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
+
+# --- Stop existing service if upgrading ---
+Stop-ExistingService
+
+# --- Copy files ---
+Write-Step "Installing to $InstallDir..."
+if (-not (Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+}
+Copy-Item "$tempExtract\*" $InstallDir -Recurse -Force
+
+# --- Load existing config if upgrading ---
+$existingConfig = $null
+$configPath = Join-Path $InstallDir 'appsettings.json'
+if (Test-Path $configPath) {
+    $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+}
+
+# --- AWS Credentials ---
+Write-Step "AWS Credentials"
+Write-Host @"
+
+  CloudPrint needs AWS credentials to access SQS.
+  These should be scoped to SQS only — see the credentials guide:
+  https://github.com/kpconnell/cloudprint/blob/main/docs/aws-credentials.md
+
+"@
+
+# Access Key ID
+$defaultKeyId = if ($existingConfig) { $existingConfig.CloudPrint.AwsAccessKeyId } else { '' }
+$maskedKeyId = if ($defaultKeyId) { $defaultKeyId.Substring(0, [Math]::Min(8, $defaultKeyId.Length)) + '...' } else { '' }
+if ($defaultKeyId) {
+    $accessKeyId = Read-Host "  AWS Access Key ID [$maskedKeyId]"
+    if ([string]::IsNullOrWhiteSpace($accessKeyId)) { $accessKeyId = $defaultKeyId }
+} else {
+    do {
+        $accessKeyId = Read-Host "  AWS Access Key ID"
+    } while ([string]::IsNullOrWhiteSpace($accessKeyId))
+}
+
+# Secret Access Key
+$defaultSecret = if ($existingConfig) { $existingConfig.CloudPrint.AwsSecretAccessKey } else { '' }
+$secretPrompt = if ($defaultSecret) { "  AWS Secret Access Key [keep existing]" } else { "  AWS Secret Access Key" }
+$secretAccessKey = Read-Host $secretPrompt -AsSecureString
+$secretPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secretAccessKey))
+
+if ([string]::IsNullOrWhiteSpace($secretPlain)) {
+    if ($defaultSecret) {
+        $secretPlain = $defaultSecret
+        Write-Host "  (Keeping existing secret)" -ForegroundColor DarkGray
+    } else {
+        Write-Error "Secret Access Key is required."
+        exit 1
+    }
+}
+
+# --- Region selection ---
+Write-Step "AWS Region"
+
+$defaultRegion = if ($existingConfig) { $existingConfig.CloudPrint.Region } else { '' }
+
+Write-Host ""
+foreach ($r in $AwsRegions) {
+    $marker = if ($r.Id -eq $defaultRegion) { ' *' } else { '' }
+    Write-Host ("  {0,2}) {1,-20} {2}{3}" -f $r.Num, $r.Id, $r.Name, $marker)
+}
+Write-Host ""
+
+$regionInput = Read-Host "  Select region (1-$($AwsRegions.Count))$(if ($defaultRegion) { " [keep $defaultRegion]" } else { '' })"
+
+if ([string]::IsNullOrWhiteSpace($regionInput) -and $defaultRegion) {
+    $region = $defaultRegion
+} else {
+    $regionNum = 0
+    if ([int]::TryParse($regionInput, [ref]$regionNum) -and $regionNum -ge 1 -and $regionNum -le $AwsRegions.Count) {
+        $region = ($AwsRegions | Where-Object { $_.Num -eq $regionNum }).Id
+    } else {
+        Write-Error "Invalid selection. Please enter a number between 1 and $($AwsRegions.Count)."
+        exit 1
+    }
+}
+
+Write-Host "  Selected: $region" -ForegroundColor Green
+
+# --- Create SQS queue ---
+$hostname = $env:COMPUTERNAME.ToLower()
+$queueName = "cloudprint-$hostname"
+
+Write-Step "Creating SQS queue '$queueName' in $region..."
+
+# Use the provided credentials to create the queue via AWS SDK in the service binary,
+# or fall back to AWS CLI if available. We'll use a simple .NET inline script.
+$env:AWS_ACCESS_KEY_ID = $accessKeyId.Trim()
+$env:AWS_SECRET_ACCESS_KEY = $secretPlain
+$env:AWS_DEFAULT_REGION = $region
+
+# Try using AWS CLI if available
+$awsCli = Get-Command aws -ErrorAction SilentlyContinue
+if ($awsCli) {
+    $queueUrl = aws sqs create-queue --queue-name $queueName --region $region --output text --query 'QueueUrl' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create SQS queue: $queueUrl`n`nCheck that your credentials have SQS access."
+        exit 1
+    }
+} else {
+    # Use the service exe to create the queue (it has the AWS SDK bundled)
+    # Fall back to constructing the URL if we can't create it
+    Write-Host "  AWS CLI not found. Attempting to create queue using service binary..." -ForegroundColor Yellow
+
+    # Try a simple HTTP call to SQS API
+    try {
+        # We'll construct the expected URL format and verify connectivity later
+        # For now, use Invoke-WebRequest with SQS Query API
+        Add-Type -AssemblyName System.Web
+        $stsUrl = "https://sqs.$region.amazonaws.com/"
+
+        # Use AWS SDK from the installed service to create queue
+        $exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
+        # Simpler: just tell the user to install AWS CLI
+        Write-Host ""
+        Write-Host "  The AWS CLI is needed to create the SQS queue." -ForegroundColor Yellow
+        Write-Host "  Install it from: https://aws.amazon.com/cli/" -ForegroundColor Yellow
+        Write-Host "  Then re-run this installer." -ForegroundColor Yellow
+        exit 1
+    }
+    catch {
+        Write-Error "Failed to create SQS queue. Please install the AWS CLI and re-run this installer."
+        exit 1
+    }
+}
+
+# Clean up env vars
+Remove-Item Env:\AWS_ACCESS_KEY_ID -ErrorAction SilentlyContinue
+Remove-Item Env:\AWS_SECRET_ACCESS_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:\AWS_DEFAULT_REGION -ErrorAction SilentlyContinue
+
+Write-Host "  Queue URL: $queueUrl" -ForegroundColor Green
+
+# --- Show printers ---
+Write-Step "Available printers on this machine:"
+$printers = Get-Printer | Select-Object Name, DriverName, PortName
+if ($printers.Count -eq 0) {
+    Write-Host "  (No printers found — you can add printers later)" -ForegroundColor Yellow
+} else {
+    $printers | Format-Table -AutoSize
+}
+
+# --- Write config ---
+Write-Step "Writing configuration..."
+
+$config = @{
+    CloudPrint = @{
+        QueueUrl = $queueUrl.Trim()
+        Region = $region
+        AwsAccessKeyId = $accessKeyId.Trim()
+        AwsSecretAccessKey = $secretPlain
+        MaxConcurrentJobs = 1
+        VisibilityTimeoutSeconds = 60
+    }
+    Serilog = @{
+        MinimumLevel = @{
+            Default = "Information"
+            Override = @{
+                Microsoft = "Warning"
+                System = "Warning"
+            }
+        }
+        WriteTo = @(
+            @{ Name = "Console" }
+            @{
+                Name = "File"
+                Args = @{
+                    path = "logs/cloudprint-.log"
+                    rollingInterval = "Day"
+                    retainedFileCountLimit = 30
+                }
+            }
+        )
+    }
+} | ConvertTo-Json -Depth 10
+
+Set-Content -Path $configPath -Value $config -Encoding UTF8
+
+# --- Lock down config file (contains credentials) ---
+$acl = Get-Acl $configPath
+$acl.SetAccessRuleProtection($true, $false)
+$acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) } | Out-Null
+$adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    "BUILTIN\Administrators", "FullControl", "Allow")
+$systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    "NT AUTHORITY\SYSTEM", "FullControl", "Allow")
+$acl.AddAccessRule($adminRule)
+$acl.AddAccessRule($systemRule)
+Set-Acl -Path $configPath -AclObject $acl
+Write-Host "  Config file locked to Administrators and SYSTEM only" -ForegroundColor DarkGray
+
+# --- Register service ---
+Write-Step "Registering Windows Service..."
+
+$exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
+New-Service -Name $ServiceName `
+    -BinaryPathName $exePath `
+    -DisplayName 'CloudPrint' `
+    -Description 'Polls AWS SQS for print jobs and routes them to local printers' `
+    -StartupType Automatic | Out-Null
+
+# --- Start service ---
+Write-Step "Starting CloudPrint service..."
+Start-Service -Name $ServiceName
+
+$svc = Get-Service -Name $ServiceName
+Write-Host @"
+
+  CloudPrint installed successfully!
+
+  Status:    $($svc.Status)
+  Install:   $InstallDir
+  Queue:     $queueName
+  Region:    $region
+  Logs:      $InstallDir\logs\
+
+  To reconfigure, run this installer again.
+
+"@ -ForegroundColor Green
+
+# --- Cleanup ---
+Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
