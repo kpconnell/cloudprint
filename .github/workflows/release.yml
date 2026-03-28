@@ -19,6 +19,9 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Test
+        run: dotnet test --verbosity normal
+
       - name: Publish
         run: |
           dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj `

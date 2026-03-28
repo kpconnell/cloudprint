@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Amazon;
 using Amazon.SecurityToken;
 using Amazon.SecurityToken.Model;
@@ -11,29 +12,35 @@ using Serilog;
 using Serilog.Settings.Configuration;
 using Serilog.Sinks.File;
 
-// --- CLI commands for install script ---
+// --- CLI commands for install script (credentials via stdin as JSON) ---
 if (args.Length > 0)
 {
     var command = args[0].ToLowerInvariant();
 
-    if (command == "verify-creds")
+    if (command == "verify-creds" || command == "create-queue")
     {
-        if (args.Length < 4)
+        var input = await Console.In.ReadToEndAsync();
+        var cliArgs = JsonSerializer.Deserialize<CliInput>(input,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (cliArgs is null || string.IsNullOrWhiteSpace(cliArgs.AccessKey)
+            || string.IsNullOrWhiteSpace(cliArgs.SecretKey) || string.IsNullOrWhiteSpace(cliArgs.Region))
         {
-            Console.Error.WriteLine("Usage: CloudPrint.Service verify-creds <access-key> <secret-key> <region>");
+            Console.Error.WriteLine("Expected JSON on stdin: {\"accessKey\":\"...\",\"secretKey\":\"...\",\"region\":\"...\",\"queueName\":\"...\"}");
             return 1;
         }
-        return await VerifyCredentials(args[1], args[2], args[3]);
-    }
 
-    if (command == "create-queue")
-    {
-        if (args.Length < 5)
+        if (command == "verify-creds")
+            return await VerifyCredentials(cliArgs.AccessKey, cliArgs.SecretKey, cliArgs.Region);
+
+        if (command == "create-queue")
         {
-            Console.Error.WriteLine("Usage: CloudPrint.Service create-queue <queue-name> <access-key> <secret-key> <region>");
-            return 1;
+            if (string.IsNullOrWhiteSpace(cliArgs.QueueName))
+            {
+                Console.Error.WriteLine("queueName is required for create-queue");
+                return 1;
+            }
+            return await CreateQueue(cliArgs.QueueName, cliArgs.AccessKey, cliArgs.SecretKey, cliArgs.Region);
         }
-        return await CreateQueue(args[1], args[2], args[3], args[4]);
     }
 }
 
@@ -136,9 +143,29 @@ static async Task<int> CreateQueue(string queueName, string accessKey, string se
         using var sqsClient = new AmazonSQSClient(
             accessKey, secretKey, RegionEndpoint.GetBySystemName(region));
 
+        // Create DLQ first
+        var dlqName = $"{queueName}-dlq";
+        var dlqResponse = await sqsClient.CreateQueueAsync(new CreateQueueRequest
+        {
+            QueueName = dlqName
+        });
+
+        // Get DLQ ARN
+        var dlqAttributes = await sqsClient.GetQueueAttributesAsync(new GetQueueAttributesRequest
+        {
+            QueueUrl = dlqResponse.QueueUrl,
+            AttributeNames = ["QueueArn"]
+        });
+        var dlqArn = dlqAttributes.Attributes["QueueArn"];
+
+        // Create main queue with redrive policy
         var response = await sqsClient.CreateQueueAsync(new CreateQueueRequest
         {
-            QueueName = queueName
+            QueueName = queueName,
+            Attributes = new Dictionary<string, string>
+            {
+                ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
+            }
         });
 
         Console.WriteLine(response.QueueUrl);
@@ -149,4 +176,13 @@ static async Task<int> CreateQueue(string queueName, string accessKey, string se
         Console.Error.WriteLine(ex.Message);
         return 1;
     }
+}
+
+// --- CLI input model ---
+class CliInput
+{
+    public string AccessKey { get; set; } = "";
+    public string SecretKey { get; set; } = "";
+    public string Region { get; set; } = "";
+    public string QueueName { get; set; } = "";
 }

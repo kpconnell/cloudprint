@@ -73,10 +73,13 @@ public class SqsPollingService : BackgroundService
         PrintJobMessage? job = null;
         try
         {
+            _logger.LogInformation("Received message {MessageId}: {Body}", message.MessageId, message.Body);
+
             job = JsonSerializer.Deserialize<PrintJobMessage>(message.Body);
             if (job is null)
             {
-                _logger.LogError("Failed to deserialize message {MessageId}: null result", message.MessageId);
+                _logger.LogError("Failed to deserialize message {MessageId}: null result. Body: {Body}",
+                    message.MessageId, message.Body);
                 return;
             }
 
@@ -91,6 +94,14 @@ public class SqsPollingService : BackgroundService
             var tempFile = await _fileDownloader.DownloadAsync(job.FileUrl, stoppingToken);
             try
             {
+                if (!FileValidator.Validate(tempFile, job.ContentType, out var validationError))
+                {
+                    _logger.LogError(
+                        "File validation failed for job {MessageId}: {Reason}. File URL: {FileUrl}",
+                        message.MessageId, validationError, job.FileUrl);
+                    return; // don't delete — let it go to DLQ
+                }
+
                 var copies = Math.Max(1, job.Copies);
                 for (var i = 0; i < copies; i++)
                 {

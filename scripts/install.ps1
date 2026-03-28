@@ -200,7 +200,8 @@ if ($reconfigureCreds) {
 # --- Verify credentials ---
 Write-Step "Verifying AWS credentials..."
 
-$verifyResult = & $exePath verify-creds $accessKeyId.Trim() $secretPlain $region 2>&1
+$cliInput = @{ accessKey = $accessKeyId.Trim(); secretKey = $secretPlain; region = $region } | ConvertTo-Json -Compress
+$verifyResult = $cliInput | & $exePath verify-creds 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Error "Invalid AWS credentials: $verifyResult"
@@ -268,9 +269,10 @@ if ($queueName.Length -gt 80) {
     $queueName = $queueName.Substring(0, 80)
 }
 
-Write-Step "Creating SQS queue '$queueName'..."
+Write-Step "Ensuring SQS queue '$queueName' exists..."
 
-$queueUrl = & $exePath create-queue $queueName $accessKeyId.Trim() $secretPlain $region 2>&1
+$cliInput = @{ accessKey = $accessKeyId.Trim(); secretKey = $secretPlain; region = $region; queueName = $queueName } | ConvertTo-Json -Compress
+$queueUrl = $cliInput | & $exePath create-queue 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Error "Failed to create SQS queue: $queueUrl`n`nCheck that your credentials have sqs:CreateQueue permission on cloudprint-* queues."
@@ -295,7 +297,7 @@ $config = @{
         AwsAccessKeyId = $accessKeyId.Trim()
         AwsSecretAccessKey = $secretPlain
         PrinterName = $selectedPrinter
-        VisibilityTimeoutSeconds = 60
+        VisibilityTimeoutSeconds = 300
     }
     Serilog = @{
         MinimumLevel = @{
