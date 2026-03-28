@@ -35,7 +35,7 @@ public class PrintRouter
             _logger.LogDebug("Routing {ContentType} to raw printer", contentType);
             _rawPrinter.PrintRaw(filePath, printerName, $"CloudPrint-{Path.GetFileName(filePath)}");
         }
-        else if (ImageContentTypes.Contains(contentType) || contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase))
+        else if (ImageContentTypes.Contains(contentType))
         {
             _logger.LogDebug("Routing {ContentType} to document printer", contentType);
             _documentPrinter.Print(filePath, printerName, contentType);

@@ -50,9 +50,13 @@ Send JSON messages to the machine's SQS queue:
 |---|---|
 | `application/vnd.zebra.zpl` | Raw passthrough (ZPL printers) |
 | `text/plain` | Raw passthrough |
-| `application/pdf` | Rendered and printed |
 | `image/png` | Printed as image |
 | `image/jpeg` | Printed as image |
+| `image/bmp` | Printed as image |
+| `image/gif` | Printed as image |
+| `image/tiff` | Printed as image |
+
+**Planned:** `application/pdf` — not yet supported. Contributions welcome.
 
 ### Fields
 

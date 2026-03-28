@@ -344,6 +344,9 @@ New-Service -Name $ServiceName `
     -Description 'Polls AWS SQS for print jobs and routes them to local printers' `
     -StartupType Automatic | Out-Null
 
+# Configure auto-restart on failure: restart after 5s, 10s, 30s
+sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
+
 # --- Start service ---
 Write-Step "Starting CloudPrint service..."
 Start-Service -Name $ServiceName

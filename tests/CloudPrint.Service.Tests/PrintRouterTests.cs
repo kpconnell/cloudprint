@@ -42,7 +42,6 @@ public class PrintRouterTests
     [InlineData("image/bmp")]
     [InlineData("image/gif")]
     [InlineData("image/tiff")]
-    [InlineData("application/pdf")]
     public void Routes_document_content_types_to_document_printer(string contentType)
     {
         var tempFile = Path.GetTempFileName();
@@ -76,7 +75,7 @@ public class PrintRouterTests
     [Theory]
     [InlineData("APPLICATION/VND.ZEBRA.ZPL")]
     [InlineData("Image/PNG")]
-    [InlineData("Application/PDF")]
+    [InlineData("Image/JPEG")]
     public void Content_type_matching_is_case_insensitive(string contentType)
     {
         var tempFile = Path.GetTempFileName();
