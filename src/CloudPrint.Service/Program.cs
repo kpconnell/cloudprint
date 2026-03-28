@@ -158,17 +158,37 @@ static async Task<int> CreateQueue(string queueName, string accessKey, string se
         });
         var dlqArn = dlqAttributes.Attributes["QueueArn"];
 
-        // Create main queue with redrive policy
-        var response = await sqsClient.CreateQueueAsync(new CreateQueueRequest
+        // Create or update main queue with redrive policy
+        string queueUrl;
+        try
         {
-            QueueName = queueName,
-            Attributes = new Dictionary<string, string>
+            var response = await sqsClient.CreateQueueAsync(new CreateQueueRequest
             {
-                ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
-            }
-        });
+                QueueName = queueName,
+                Attributes = new Dictionary<string, string>
+                {
+                    ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
+                }
+            });
+            queueUrl = response.QueueUrl;
+        }
+        catch (AmazonSQSException ex) when (ex.ErrorCode == "QueueAlreadyExists")
+        {
+            // Queue exists with different attributes — get its URL and update the redrive policy
+            var urlResponse = await sqsClient.GetQueueUrlAsync(queueName);
+            queueUrl = urlResponse.QueueUrl;
 
-        Console.WriteLine(response.QueueUrl);
+            await sqsClient.SetQueueAttributesAsync(new SetQueueAttributesRequest
+            {
+                QueueUrl = queueUrl,
+                Attributes = new Dictionary<string, string>
+                {
+                    ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
+                }
+            });
+        }
+
+        Console.WriteLine(queueUrl);
         return 0;
     }
     catch (Exception ex)
