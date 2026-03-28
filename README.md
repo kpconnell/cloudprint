@@ -30,7 +30,20 @@ On reinstall, existing credentials and printer selection are preserved — just 
 6. On success, the message is deleted from the queue
 7. On failure, the message remains for retry (up to 5 attempts, then moved to DLQ)
 
-Each machine/printer gets its own queue, named `cloudprint-{HOSTNAME}-{PRINTER}`.
+### Queue Naming
+
+Each machine/printer gets its own queue pair:
+
+| Queue | Example | Purpose |
+|---|---|---|
+| Main | `cloudprint-{hostname}-{printer}` | Print jobs |
+| DLQ | `cloudprint-{hostname}-{printer}-dlq` | Failed jobs (after 5 retries) |
+
+The hostname and printer name are lowercased with non-alphanumeric characters replaced by hyphens. For example, a machine `WAREHOUSE-PC1` with printer `Zebra ZP500` produces:
+- `cloudprint-warehouse-pc1-zebra-zp500`
+- `cloudprint-warehouse-pc1-zebra-zp500-dlq`
+
+Queue names are capped at 80 characters (SQS limit).
 
 ## Message Format
 

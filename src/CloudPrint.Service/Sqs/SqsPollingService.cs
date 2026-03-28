@@ -102,7 +102,7 @@ public class SqsPollingService : BackgroundService
                     return; // don't delete — let it go to DLQ
                 }
 
-                var copies = Math.Max(1, job.Copies);
+                var copies = Math.Clamp(job.Copies, 1, 100);
                 for (var i = 0; i < copies; i++)
                 {
                     _printRouter.Print(tempFile, printerName, job.ContentType);

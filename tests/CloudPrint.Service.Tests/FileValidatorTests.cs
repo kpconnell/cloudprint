@@ -29,7 +29,59 @@ public class FileValidatorTests
     [Fact]
     public void Validates_zpl_tilde_command()
     {
-        var path = WriteTempFile("~DG000.GRF,1,1,FF");
+        // ~EG is a safe tilde command (erase graphic — removes from buffer, not flash)
+        var path = WriteTempFile("~EG^XA^FO50,50^FDTest^FS^XZ");
+        try
+        {
+            Assert.True(FileValidator.Validate(path, "application/vnd.zebra.zpl", out _));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("^XA^XB^XZ", "^XB")]                                       // firmware download
+    [InlineData("^XA^IDR:LABEL.ZPL^XZ", "^ID")]                            // delete stored object
+    [InlineData("^XA^ILR:LABEL.ZPL^XZ", "^IL")]                            // delete stored label
+    [InlineData("^XA^FO10,10^FDhello^FS~JR", "~JR")]                       // power-cycle reset
+    [InlineData("^XA~JB^XZ", "~JB")]                                       // factory reset
+    [InlineData("^XA~DGR:SAMPLE.GRF,1,1,FF^XZ", "~DG")]                    // download graphic to memory
+    [InlineData("^XA~DYR:FILE.TTF,A,0,,data^XZ", "~DY")]                   // download objects to flash
+    [InlineData("^XA^WFR:FIRMWARE.ZPL^XZ", "^WF")]                         // write firmware
+    [InlineData("^XA~HS^XZ", "~HS")]                                       // host status info leak
+    [InlineData("^XA~HI^XZ", "~HI")]                                       // host identification info leak
+    [InlineData("^XA~HD^XZ", "~HD")]                                       // head diagnostic info leak
+    [InlineData("^XA~WC^XZ", "~WC")]                                       // print config (waste labels)
+    [InlineData("^XA~WR^XZ", "~WR")]                                       // write RFID
+    public void Rejects_zpl_with_dangerous_commands(string zpl, string blockedCommand)
+    {
+        var path = WriteTempFile(zpl);
+        try
+        {
+            Assert.False(FileValidator.Validate(path, "application/vnd.zebra.zpl", out var reason));
+            Assert.Contains("blocked command", reason);
+            Assert.Contains(blockedCommand, reason, StringComparison.OrdinalIgnoreCase);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Rejects_dangerous_zpl_commands_case_insensitively()
+    {
+        var path = WriteTempFile("^XA^xb^XZ");
+        try
+        {
+            Assert.False(FileValidator.Validate(path, "application/vnd.zebra.zpl", out var reason));
+            Assert.Contains("blocked command", reason);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Allows_safe_zpl_label()
+    {
+        // A typical shipping label with common safe commands
+        var zpl = "^XA^FO50,50^ADN,36,20^FDShip To:^FS^FO50,100^BY3^BCN,100,Y,N,N^FD12345678^FS^PQ2^XZ";
+        var path = WriteTempFile(zpl);
         try
         {
             Assert.True(FileValidator.Validate(path, "application/vnd.zebra.zpl", out _));
@@ -96,12 +148,24 @@ public class FileValidatorTests
     }
 
     [Fact]
-    public void Text_plain_accepts_anything()
+    public void Text_plain_accepts_printable_ascii()
     {
-        var path = WriteTempFile("literally anything");
+        var path = WriteTempFile("Hello, World!\r\n\tIndented line.");
         try
         {
             Assert.True(FileValidator.Validate(path, "text/plain", out _));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Text_plain_rejects_binary_content()
+    {
+        var path = WriteTempBytes([0x00, 0x01, 0x02, 0x80, 0xFF]);
+        try
+        {
+            Assert.False(FileValidator.Validate(path, "text/plain", out var reason));
+            Assert.Contains("does not match", reason);
         }
         finally { File.Delete(path); }
     }

@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CloudPrint.Service.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="AWSSDK.SecurityToken" Version="4.0.5.15" />
     <PackageReference Include="AWSSDK.SQS" Version="4.0.2.19" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />

@@ -1,8 +1,11 @@
 #if WINDOWS
 using System.Drawing;
 using System.Drawing.Printing;
+using System.Runtime.Versioning;
 
 namespace CloudPrint.Service.Printing;
+
+[SupportedOSPlatform("windows")]
 
 public class DocumentPrinter : IDocumentPrinter
 {
