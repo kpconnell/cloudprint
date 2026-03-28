@@ -42,7 +42,7 @@ public class SqsPollingService : BackgroundService
                 var request = new ReceiveMessageRequest
                 {
                     QueueUrl = _options.QueueUrl,
-                    MaxNumberOfMessages = _options.MaxConcurrentJobs,
+                    MaxNumberOfMessages = 1,
                     WaitTimeSeconds = 20,
                     VisibilityTimeout = _options.VisibilityTimeoutSeconds
                 };

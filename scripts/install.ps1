@@ -90,6 +90,13 @@ Invoke-WebRequest -Uri $zipAsset.browser_download_url -OutFile $tempZip
 if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
 Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
 
+# --- Load existing config before overwriting files ---
+$existingConfig = $null
+$configPath = Join-Path $InstallDir 'appsettings.json'
+if (Test-Path $configPath) {
+    $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+}
+
 # --- Stop existing service if upgrading ---
 Stop-ExistingService
 
@@ -101,13 +108,6 @@ if (-not (Test-Path $InstallDir)) {
 Copy-Item "$tempExtract\*" $InstallDir -Recurse -Force
 
 $exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
-
-# --- Load existing config if upgrading ---
-$existingConfig = $null
-$configPath = Join-Path $InstallDir 'appsettings.json'
-if (Test-Path $configPath) {
-    $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json
-}
 
 # --- AWS Credentials ---
 $reconfigureCreds = $true
@@ -295,7 +295,6 @@ $config = @{
         AwsAccessKeyId = $accessKeyId.Trim()
         AwsSecretAccessKey = $secretPlain
         PrinterName = $selectedPrinter
-        MaxConcurrentJobs = 1
         VisibilityTimeoutSeconds = 60
     }
     Serilog = @{

@@ -9,6 +9,5 @@ public class CloudPrintOptions
     public string AwsAccessKeyId { get; set; } = string.Empty;
     public string AwsSecretAccessKey { get; set; } = string.Empty;
     public string PrinterName { get; set; } = string.Empty;
-    public int MaxConcurrentJobs { get; set; } = 1;
     public int VisibilityTimeoutSeconds { get; set; } = 60;
 }
