@@ -1,5 +1,5 @@
 using System.Text.Json;
-using CloudPrint.Service.Sqs;
+using CloudPrint.Service.Transport;
 
 namespace CloudPrint.Service.Tests;
 

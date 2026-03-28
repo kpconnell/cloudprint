@@ -109,6 +109,47 @@ Copy-Item "$tempExtract\*" $InstallDir -Recurse -Force
 
 $exePath = Join-Path $InstallDir 'CloudPrint.Service.exe'
 
+# --- Transport selection ---
+$defaultTransport = if ($existingConfig) { $existingConfig.CloudPrint.Transport } else { '' }
+$reconfigureTransport = $true
+
+if ($defaultTransport) {
+    $transportLabel = if ($defaultTransport -eq 'sqs') { 'AWS SQS' } else { 'HTTP API' }
+    Write-Step "Current Transport: $transportLabel"
+    $answer = Read-Host "  Change transport? [y/N]"
+    if ($answer -match '^[Yy]') {
+        $reconfigureTransport = $true
+    } else {
+        $reconfigureTransport = $false
+        $transport = $defaultTransport
+    }
+}
+
+if ($reconfigureTransport) {
+    Write-Step "Transport"
+    Write-Host ""
+    Write-Host "  1) AWS SQS"
+    Write-Host "  2) HTTP API"
+    Write-Host ""
+
+    $transportInput = Read-Host "  Select transport (1-2)$(if ($defaultTransport) { " [keep current]" } else { '' })"
+
+    if ([string]::IsNullOrWhiteSpace($transportInput) -and $defaultTransport) {
+        $transport = $defaultTransport
+    } elseif ($transportInput -eq '1') {
+        $transport = 'sqs'
+    } elseif ($transportInput -eq '2') {
+        $transport = 'http'
+    } else {
+        Write-Error "Invalid selection."
+        exit 1
+    }
+}
+
+Write-Host "  Selected: $transport" -ForegroundColor Green
+
+if ($transport -eq 'sqs') {
+
 # --- AWS Credentials ---
 $reconfigureCreds = $true
 $defaultKeyId = if ($existingConfig) { $existingConfig.CloudPrint.AwsAccessKeyId } else { '' }
@@ -281,6 +322,70 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  Queue: $queueUrl" -ForegroundColor Green
 
+} else {
+    # --- HTTP API Configuration ---
+    $reconfigureApi = $true
+    $defaultApiUrl = if ($existingConfig) { $existingConfig.CloudPrint.ApiUrl } else { '' }
+    $defaultAckUrl = if ($existingConfig) { $existingConfig.CloudPrint.AckUrl } else { '' }
+    $defaultHeaderName = if ($existingConfig) { $existingConfig.CloudPrint.ApiHeaderName } else { 'X-Api-Key' }
+    $defaultHeaderValue = if ($existingConfig) { $existingConfig.CloudPrint.ApiHeaderValue } else { '' }
+
+    if ($defaultApiUrl -and $defaultAckUrl -and $defaultHeaderValue) {
+        Write-Step "Current HTTP API Configuration"
+        Write-Host ""
+        Write-Host "  API URL:     $defaultApiUrl"
+        Write-Host "  Ack URL:     $defaultAckUrl"
+        Write-Host "  Header:      $defaultHeaderName"
+        Write-Host ""
+        $answer = Read-Host "  Reconfigure HTTP API? [y/N]"
+        if ($answer -match '^[Yy]') {
+            $reconfigureApi = $true
+        } else {
+            $reconfigureApi = $false
+            $apiUrl = $defaultApiUrl
+            $ackUrl = $defaultAckUrl
+            $apiHeaderName = $defaultHeaderName
+            $apiHeaderValue = $defaultHeaderValue
+        }
+    }
+
+    if ($reconfigureApi) {
+        Write-Step "HTTP API Configuration"
+        Write-Host ""
+
+        if ($defaultApiUrl) {
+            $apiUrl = Read-Host "  API URL (fetch jobs) [$defaultApiUrl]"
+            if ([string]::IsNullOrWhiteSpace($apiUrl)) { $apiUrl = $defaultApiUrl }
+        } else {
+            do {
+                $apiUrl = Read-Host "  API URL (fetch jobs)"
+            } while ([string]::IsNullOrWhiteSpace($apiUrl))
+        }
+
+        if ($defaultAckUrl) {
+            $ackUrl = Read-Host "  Ack URL (acknowledge jobs) [$defaultAckUrl]"
+            if ([string]::IsNullOrWhiteSpace($ackUrl)) { $ackUrl = $defaultAckUrl }
+        } else {
+            do {
+                $ackUrl = Read-Host "  Ack URL (acknowledge jobs)"
+            } while ([string]::IsNullOrWhiteSpace($ackUrl))
+        }
+
+        $apiHeaderName = Read-Host "  Auth header name [$defaultHeaderName]"
+        if ([string]::IsNullOrWhiteSpace($apiHeaderName)) { $apiHeaderName = $defaultHeaderName }
+
+        $secretPrompt = if ($defaultHeaderValue) { "  Auth header value [keep existing]" } else { "  Auth header value" }
+        $apiHeaderValue = Read-Host $secretPrompt
+        if ([string]::IsNullOrWhiteSpace($apiHeaderValue) -and $defaultHeaderValue) {
+            $apiHeaderValue = $defaultHeaderValue
+            Write-Host "  (Keeping existing value)" -ForegroundColor DarkGray
+        } elseif ([string]::IsNullOrWhiteSpace($apiHeaderValue)) {
+            Write-Error "Auth header value is required."
+            exit 1
+        }
+    }
+}
+
 # --- Ensure log directory ---
 $logDir = "$env:ProgramData\CloudPrint\logs"
 if (-not (Test-Path $logDir)) {
@@ -290,15 +395,27 @@ if (-not (Test-Path $logDir)) {
 # --- Write config ---
 Write-Step "Writing configuration..."
 
+$cloudPrintConfig = @{
+    Transport = $transport
+    PrinterName = $selectedPrinter
+}
+
+if ($transport -eq 'sqs') {
+    $cloudPrintConfig.QueueUrl = $queueUrl.Trim()
+    $cloudPrintConfig.Region = $region
+    $cloudPrintConfig.AwsAccessKeyId = $accessKeyId.Trim()
+    $cloudPrintConfig.AwsSecretAccessKey = $secretPlain
+    $cloudPrintConfig.VisibilityTimeoutSeconds = 300
+} else {
+    $cloudPrintConfig.ApiUrl = $apiUrl.Trim()
+    $cloudPrintConfig.AckUrl = $ackUrl.Trim()
+    $cloudPrintConfig.ApiHeaderName = $apiHeaderName
+    $cloudPrintConfig.ApiHeaderValue = $apiHeaderValue
+    $cloudPrintConfig.HttpPollTimeoutSeconds = 30
+}
+
 $config = @{
-    CloudPrint = @{
-        QueueUrl = $queueUrl.Trim()
-        Region = $region
-        AwsAccessKeyId = $accessKeyId.Trim()
-        AwsSecretAccessKey = $secretPlain
-        PrinterName = $selectedPrinter
-        VisibilityTimeoutSeconds = 300
-    }
+    CloudPrint = $cloudPrintConfig
     Serilog = @{
         MinimumLevel = @{
             Default = "Information"
@@ -353,20 +470,23 @@ Write-Step "Starting CloudPrint service..."
 Start-Service -Name $ServiceName
 
 $svc = Get-Service -Name $ServiceName
-Write-Host @"
-
-  CloudPrint installed successfully!
-
-  Status:    $($svc.Status)
-  Install:   $InstallDir
-  Printer:   $selectedPrinter
-  Queue:     $queueName
-  Region:    $region
-  Logs:      C:\ProgramData\CloudPrint\logs\
-
-  To reconfigure, run this installer again.
-
-"@ -ForegroundColor Green
+Write-Host "`n  CloudPrint installed successfully!" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Status:    $($svc.Status)"
+Write-Host "  Install:   $InstallDir"
+Write-Host "  Transport: $transport"
+Write-Host "  Printer:   $selectedPrinter"
+if ($transport -eq 'sqs') {
+    Write-Host "  Queue:     $queueName"
+    Write-Host "  Region:    $region"
+} else {
+    Write-Host "  API URL:   $apiUrl"
+    Write-Host "  Ack URL:   $ackUrl"
+}
+Write-Host "  Logs:      C:\ProgramData\CloudPrint\logs\"
+Write-Host ""
+Write-Host "  To reconfigure, run this installer again." -ForegroundColor Cyan
+Write-Host "" -ForegroundColor Green
 
 # --- Cleanup ---
 Remove-Item $tempZip -Force -ErrorAction SilentlyContinue

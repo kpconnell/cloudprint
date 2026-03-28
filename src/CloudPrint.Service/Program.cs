@@ -7,7 +7,7 @@ using Amazon.SQS.Model;
 using CloudPrint.Service.Configuration;
 using CloudPrint.Service.FileHandling;
 using CloudPrint.Service.Printing;
-using CloudPrint.Service.Sqs;
+using CloudPrint.Service.Transport;
 using Serilog;
 using Serilog.Settings.Configuration;
 using Serilog.Sinks.File;
@@ -76,10 +76,24 @@ try
         .GetSection(CloudPrintOptions.SectionName)
         .Get<CloudPrintOptions>() ?? new CloudPrintOptions();
 
-    builder.Services.AddSingleton<IAmazonSQS>(_ => new AmazonSQSClient(
-        cloudPrintOptions.AwsAccessKeyId,
-        cloudPrintOptions.AwsSecretAccessKey,
-        RegionEndpoint.GetBySystemName(cloudPrintOptions.Region)));
+    // Register transport based on config
+    var transport = cloudPrintOptions.Transport?.ToLowerInvariant() ?? "sqs";
+    switch (transport)
+    {
+        case "sqs":
+            builder.Services.AddSingleton<IAmazonSQS>(_ => new AmazonSQSClient(
+                cloudPrintOptions.AwsAccessKeyId,
+                cloudPrintOptions.AwsSecretAccessKey,
+                RegionEndpoint.GetBySystemName(cloudPrintOptions.Region)));
+            builder.Services.AddSingleton<IJobSource, SqsJobSource>();
+            break;
+        case "http":
+            builder.Services.AddHttpClient<HttpApiJobSource>();
+            builder.Services.AddSingleton<IJobSource>(sp => sp.GetRequiredService<HttpApiJobSource>());
+            break;
+        default:
+            throw new InvalidOperationException($"Unknown transport: {transport}. Use 'sqs' or 'http'.");
+    }
 
     builder.Services.AddHttpClient<FileDownloader>();
 
@@ -100,7 +114,8 @@ try
 #endif
 
     builder.Services.AddSingleton<PrintRouter>();
-    builder.Services.AddHostedService<SqsPollingService>();
+    builder.Services.AddSingleton<IJobProcessor, JobProcessor>();
+    builder.Services.AddHostedService<PrintJobPollingService>();
 
     var host = builder.Build();
     host.Run();
@@ -174,7 +189,6 @@ static async Task<int> CreateQueue(string queueName, string accessKey, string se
         }
         catch (AmazonSQSException ex) when (ex.ErrorCode == "QueueAlreadyExists")
         {
-            // Queue exists with different attributes — get its URL and update the redrive policy
             var urlResponse = await sqsClient.GetQueueUrlAsync(queueName);
             queueUrl = urlResponse.QueueUrl;
 

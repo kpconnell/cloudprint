@@ -91,13 +91,18 @@ Send JSON messages to the machine's SQS queue:
 - **Credential passing**: Install script passes credentials to the service binary via stdin (not visible in process listings)
 - **IAM scoping**: Credentials should be scoped to `cloudprint-*` SQS queues only — see [AWS Credentials Guide](docs/aws-credentials.md)
 
-## Configuration
+## Transports
 
-Configuration lives in `appsettings.json` at `C:\Program Files\CloudPrint\`.
+CloudPrint supports two transport modes, selected during install:
+
+### AWS SQS
+
+The default transport. See [AWS Credentials Guide](docs/aws-credentials.md) for IAM setup.
 
 ```json
 {
   "CloudPrint": {
+    "Transport": "sqs",
     "QueueUrl": "https://sqs.us-east-2.amazonaws.com/123456789/cloudprint-HOSTNAME-PRINTER",
     "Region": "us-east-2",
     "AwsAccessKeyId": "AKIA...",
@@ -107,6 +112,95 @@ Configuration lives in `appsettings.json` at `C:\Program Files\CloudPrint\`.
   }
 }
 ```
+
+### HTTP API
+
+For in-house APIs that serve print jobs directly. CloudPrint long-polls your API for jobs and reports results via PATCH.
+
+```json
+{
+  "CloudPrint": {
+    "Transport": "http",
+    "ApiUrl": "https://api.example.com/print-jobs/next",
+    "AckUrl": "https://api.example.com/print-jobs",
+    "ApiHeaderName": "X-Api-Key",
+    "ApiHeaderValue": "your-api-key",
+    "HttpPollTimeoutSeconds": 30,
+    "PrinterName": "Zebra_ZP500"
+  }
+}
+```
+
+#### HTTP API Spec (for server implementors)
+
+**Fetch next job:**
+
+```
+GET {ApiUrl}?timeout={seconds}
+Headers: {ApiHeaderName}: {ApiHeaderValue}
+```
+
+Server behavior:
+- Hold the connection open for up to `timeout` seconds (default 30)
+- If a job becomes available, return it immediately with **200**
+- If no job is available after the timeout, return **204 No Content**
+- When returning a job, move it from `ready` → `sent` (locked for processing)
+- If not acknowledged within a server-side timeout, return it to `ready`
+
+**200 Response:**
+```json
+{
+  "id": "job-123",
+  "fileUrl": "https://s3.amazonaws.com/bucket/label.zpl",
+  "printerName": "Zebra_ZP500",
+  "contentType": "application/vnd.zebra.zpl",
+  "copies": 1,
+  "metadata": {}
+}
+```
+
+**204 Response:** empty body
+
+**401 Response:** invalid API key
+
+**Acknowledge job:**
+
+```
+PATCH {AckUrl}/{jobId}
+Headers: {ApiHeaderName}: {ApiHeaderValue}
+Content-Type: application/json
+```
+
+On success:
+```json
+{ "status": "completed" }
+```
+
+On failure:
+```json
+{ "status": "failed", "error": "File validation failed: ..." }
+```
+
+**Job lifecycle (server-side):**
+
+```
+ready → sent → completed
+              → failed
+         ↓ (timeout, no ack)
+        ready (retry)
+```
+
+**Client behavior:**
+
+```
+loop:
+    response = GET {ApiUrl}?timeout=30
+    if 204: re-poll immediately (server already waited)
+    if 200: download → validate → print → PATCH ack → re-poll
+    if error: wait 5s, retry
+```
+
+No client-side poll interval is needed — the long-poll timeout IS the wait.
 
 ## Logging
 
@@ -130,7 +224,8 @@ Remove-Item "C:\Program Files\CloudPrint" -Recurse
 ## Requirements
 
 - Windows 10/11 or Windows Server 2016+
-- AWS account with SQS access
+- **SQS transport**: AWS account with SQS access
+- **HTTP transport**: An API implementing the spec above
 - No .NET runtime required (self-contained build)
 
 ## Development

@@ -1,9 +1,12 @@
 using System.Text.Json.Serialization;
 
-namespace CloudPrint.Service.Sqs;
+namespace CloudPrint.Service.Transport;
 
 public class PrintJobMessage
 {
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
     [JsonPropertyName("fileUrl")]
     public string FileUrl { get; set; } = string.Empty;
 
