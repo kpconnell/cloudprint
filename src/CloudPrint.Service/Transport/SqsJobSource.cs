@@ -57,19 +57,16 @@ public class SqsJobSource : IJobSource
         };
     }
 
-    public async Task AcknowledgeAsync(string jobId, bool success, string? error, CancellationToken cancellationToken)
+    public Task AcknowledgeAsync(string jobId, bool success, string? error, CancellationToken cancellationToken)
     {
-        if (success)
+        // SQS ack = delete message (handled by polling service via DeleteMessageAsync)
+        // SQS failure = do nothing — visibility timeout expires and message returns to queue automatically
+        if (!success)
         {
-            // Find the receipt handle — we need it from the envelope
-            // This is handled by the polling service passing the receipt handle
-            _logger.LogDebug("SQS ack for job {JobId} handled by polling service", jobId);
+            _logger.LogDebug("Job {JobId} failed — message will return to queue after visibility timeout expires", jobId);
         }
-        else
-        {
-            // On failure, let the visibility timeout expire — message returns to queue
-            _logger.LogDebug("SQS nack for job {JobId} — message will return to queue after visibility timeout", jobId);
-        }
+
+        return Task.CompletedTask;
     }
 
     public async Task DeleteMessageAsync(string receiptHandle, CancellationToken cancellationToken)
