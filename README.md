@@ -82,6 +82,87 @@ Send JSON messages to the machine's SQS queue:
 | `copies` | No | Number of copies (default: 1) |
 | `metadata` | No | Arbitrary key-value pairs for your own tracking |
 
+## AWS IAM Setup
+
+CloudPrint needs an IAM user with narrowly scoped permissions. The credentials can only access `cloudprint-*` SQS queues and nothing else.
+
+### 1. Create the IAM Policy
+
+In the [IAM Console](https://console.aws.amazon.com/iam/), go to **Policies** → **Create policy** → **JSON** tab:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "CloudPrintSQSAccess",
+            "Effect": "Allow",
+            "Action": [
+                "sqs:CreateQueue",
+                "sqs:SetQueueAttributes",
+                "sqs:GetQueueAttributes",
+                "sqs:GetQueueUrl",
+                "sqs:ReceiveMessage",
+                "sqs:DeleteMessage"
+            ],
+            "Resource": "arn:aws:sqs:*:*:cloudprint-*"
+        },
+        {
+            "Sid": "CloudPrintCredentialVerification",
+            "Effect": "Allow",
+            "Action": "sts:GetCallerIdentity",
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+Name the policy `CloudPrintSQSAccess`.
+
+| Action | Why |
+|--------|-----|
+| `sqs:CreateQueue` | Installer auto-creates the main queue + dead-letter queue |
+| `sqs:SetQueueAttributes` | Sets the redrive policy (DLQ) on existing queues |
+| `sqs:GetQueueAttributes` | Reads the DLQ ARN to wire up the redrive policy |
+| `sqs:GetQueueUrl` | Looks up the queue URL when it already exists |
+| `sqs:ReceiveMessage` | Long-polls the queue for print jobs |
+| `sqs:DeleteMessage` | Removes a message after successful printing |
+| `sts:GetCallerIdentity` | Validates credentials during installation |
+
+### 2. Create the IAM User
+
+1. **Users** → **Create user** → name it `cloudprint-service`
+2. Do **not** enable console access
+3. Attach the `CloudPrintSQSAccess` policy
+4. **Security credentials** → **Create access key** → select **Application running outside AWS**
+5. Copy the **Access Key ID** and **Secret Access Key**
+
+Provide these during the CloudPrint installer. You do not need to create SQS queues manually — the installer handles that.
+
+<details>
+<summary>AWS CLI alternative</summary>
+
+```bash
+# Create the policy
+aws iam create-policy \
+  --policy-name CloudPrintSQSAccess \
+  --policy-document file://docs/cloudprint-iam-policy.json
+
+# Create the user (no console access)
+aws iam create-user --user-name cloudprint-service
+
+# Attach the policy (replace ACCOUNT_ID)
+aws iam attach-user-policy \
+  --user-name cloudprint-service \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/CloudPrintSQSAccess
+
+# Create access keys (secret is only shown once)
+aws iam create-access-key --user-name cloudprint-service
+```
+</details>
+
+For credential rotation and multi-machine setups, see the full [AWS Credentials Guide](docs/aws-credentials.md).
+
 ## Security
 
 - **Credentials**: AWS access keys are stored in `appsettings.json` with file ACLs restricted to Administrators and SYSTEM only
@@ -89,7 +170,7 @@ Send JSON messages to the machine's SQS queue:
 - **File validation**: Downloaded files are checked against magic bytes for the claimed content type
 - **File size limit**: Downloads are capped at 50MB
 - **Credential passing**: Install script passes credentials to the service binary via stdin (not visible in process listings)
-- **IAM scoping**: Credentials should be scoped to `cloudprint-*` SQS queues only — see [AWS Credentials Guide](docs/aws-credentials.md)
+- **IAM scoping**: Credentials are scoped to `cloudprint-*` SQS queues only (see policy above)
 
 ## Transports
 

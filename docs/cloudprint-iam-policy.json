@@ -1,0 +1,24 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "CloudPrintSQSAccess",
+            "Effect": "Allow",
+            "Action": [
+                "sqs:CreateQueue",
+                "sqs:SetQueueAttributes",
+                "sqs:GetQueueAttributes",
+                "sqs:GetQueueUrl",
+                "sqs:ReceiveMessage",
+                "sqs:DeleteMessage"
+            ],
+            "Resource": "arn:aws:sqs:*:*:cloudprint-*"
+        },
+        {
+            "Sid": "CloudPrintCredentialVerification",
+            "Effect": "Allow",
+            "Action": "sts:GetCallerIdentity",
+            "Resource": "*"
+        }
+    ]
+}
