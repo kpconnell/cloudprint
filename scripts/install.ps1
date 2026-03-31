@@ -489,5 +489,5 @@ Write-Host "  To reconfigure, run this installer again." -ForegroundColor Cyan
 Write-Host "" -ForegroundColor Green
 
 # --- Cleanup ---
-Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
-Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+try { if (Test-Path $tempZip) { Remove-Item $tempZip -Force } } catch {}
+try { if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force } } catch {}
