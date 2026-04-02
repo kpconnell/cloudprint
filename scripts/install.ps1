@@ -62,6 +62,10 @@ if ($Uninstall) {
     exit 0
 }
 
+# --- Download latest release ---
+$releaseInfo = Invoke-RestMethod "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+$version = $releaseInfo.tag_name
+
 Write-Host @"
 
    _____ _                 _ _____      _       _
@@ -70,12 +74,10 @@ Write-Host @"
  | |    | |/ _ \| | | |/ _`` |  ___/ '__| | '_ \| __|
  | |____| | (_) | |_| | (_| | |   | |  | | | | | |_
   \_____|_|\___/ \__,_|\__,_|_|   |_|  |_|_| |_|\__|
-
+                                              $version
 "@ -ForegroundColor Cyan
 
-# --- Download latest release ---
-Write-Step "Downloading latest release..."
-$releaseInfo = Invoke-RestMethod "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+Write-Step "Downloading $version..."
 $zipAsset = $releaseInfo.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
 
 if (-not $zipAsset) {

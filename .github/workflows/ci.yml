@@ -17,8 +17,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Check formatting
+        run: dotnet format --verify-no-changes
+
       - name: Build
-        run: dotnet build
+        run: dotnet build /warnaserror
 
       - name: Test
         run: dotnet test --no-build --verbosity normal
