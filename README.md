@@ -1,6 +1,10 @@
 # CloudPrint
 
-A Windows Service that polls AWS SQS for print jobs and routes them to local printers. Designed for environments where cloud applications need to print to on-premise printers (shipping labels, receipts, documents).
+A Windows Service that receives print jobs from the cloud and routes them to local printers. Designed for environments where cloud applications need to print to on-premise printers (shipping labels, receipts, documents).
+
+Supports two transport modes:
+- **AWS SQS** — polls an SQS queue for jobs (auto-provisioned per machine/printer)
+- **HTTP API** — long-polls your own API for jobs (bring your own server)
 
 ## Quick Install
 
@@ -11,43 +15,25 @@ irm https://github.com/kpconnell/cloudprint/releases/latest/download/install.ps1
 ```
 
 The installer will:
-1. Prompt for AWS credentials (Access Key ID + Secret Access Key)
-2. Show a list of AWS regions to choose from
-3. Verify credentials are valid
-4. Show available local printers and let you pick one
-5. Create an SQS queue + dead letter queue for this machine/printer
-6. Install and start the Windows Service
+1. Show available local printers and let you pick one
+2. Ask which transport to use (SQS or HTTP)
+3. Prompt for transport-specific configuration (AWS credentials or API URL + key)
+4. Install and start the Windows Service
 
-On reinstall, existing credentials and printer selection are preserved — just press Enter to keep them.
+On reinstall, existing configuration is preserved — just press Enter to keep current values.
 
 ## How It Works
 
-1. A producer (your app) sends a message to the machine's SQS queue
-2. CloudPrint long-polls the queue and picks up the message
-3. The file is downloaded from the HTTPS URL in the message
-4. The file is validated (magic bytes check against claimed content type)
-5. The file is sent to the configured printer
-6. On success, the message is deleted from the queue
-7. On failure, the message remains for retry (up to 5 attempts, then moved to DLQ)
+1. CloudPrint long-polls for jobs (from SQS or your HTTP API, depending on transport)
+2. The file is downloaded from the HTTPS URL in the job
+3. The file is validated (magic bytes check against claimed content type)
+4. The file is sent to the configured printer
+5. On success, the job is acknowledged (deleted from SQS, or PATCH'd as completed via HTTP)
+6. On failure, the job is retried (SQS visibility timeout / HTTP server-side retry)
 
-### Queue Naming
+## Job Format
 
-Each machine/printer gets its own queue pair:
-
-| Queue | Example | Purpose |
-|---|---|---|
-| Main | `cloudprint-{hostname}-{printer}` | Print jobs |
-| DLQ | `cloudprint-{hostname}-{printer}-dlq` | Failed jobs (after 5 retries) |
-
-The hostname and printer name are lowercased with non-alphanumeric characters replaced by hyphens. For example, a machine `WAREHOUSE-PC1` with printer `Zebra ZP500` produces:
-- `cloudprint-warehouse-pc1-zebra-zp500`
-- `cloudprint-warehouse-pc1-zebra-zp500-dlq`
-
-Queue names are capped at 80 characters (SQS limit).
-
-## Message Format
-
-Send JSON messages to the machine's SQS queue:
+Jobs are JSON with the same shape regardless of transport:
 
 ```json
 {
@@ -57,6 +43,18 @@ Send JSON messages to the machine's SQS queue:
   "metadata": {}
 }
 ```
+
+### Fields
+
+| Field | Required | Description |
+|---|---|---|
+| `fileUrl` | Yes | HTTPS URL to the file (signed or public) |
+| `printerName` | No | Override the configured printer (optional) |
+| `contentType` | Yes | MIME type determining how the file is printed |
+| `copies` | No | Number of copies (default: 1) |
+| `metadata` | No | Arbitrary key-value pairs for your own tracking |
+
+For SQS, send this as the message body. For HTTP, your API returns this as the response body (with an additional `id` field).
 
 ### Supported Content Types
 
@@ -72,21 +70,48 @@ Send JSON messages to the machine's SQS queue:
 
 **Planned:** `application/pdf` — not yet supported. Contributions welcome.
 
-### Fields
+## Transports
 
-| Field | Required | Description |
+CloudPrint supports two transport modes, selected during install.
+
+### AWS SQS
+
+The default transport. The installer auto-creates an SQS queue pair per machine/printer.
+
+```json
+{
+  "CloudPrint": {
+    "Transport": "sqs",
+    "QueueUrl": "https://sqs.us-east-2.amazonaws.com/123456789/cloudprint-HOSTNAME-PRINTER",
+    "Region": "us-east-2",
+    "AwsAccessKeyId": "AKIA...",
+    "AwsSecretAccessKey": "...",
+    "PrinterName": "Zebra_ZP500",
+    "VisibilityTimeoutSeconds": 300
+  }
+}
+```
+
+#### Queue Naming
+
+Each machine/printer gets its own queue pair:
+
+| Queue | Example | Purpose |
 |---|---|---|
-| `fileUrl` | Yes | HTTPS URL to the file (signed or public) |
-| `printerName` | No | Override the configured printer (optional) |
-| `contentType` | Yes | MIME type determining how the file is printed |
-| `copies` | No | Number of copies (default: 1) |
-| `metadata` | No | Arbitrary key-value pairs for your own tracking |
+| Main | `cloudprint-{hostname}-{printer}` | Print jobs |
+| DLQ | `cloudprint-{hostname}-{printer}-dlq` | Failed jobs (after 5 retries) |
 
-## AWS IAM Setup
+The hostname and printer name are lowercased with non-alphanumeric characters replaced by hyphens. For example, a machine `WAREHOUSE-PC1` with printer `Zebra ZP500` produces:
+- `cloudprint-warehouse-pc1-zebra-zp500`
+- `cloudprint-warehouse-pc1-zebra-zp500-dlq`
+
+Queue names are capped at 80 characters (SQS limit).
+
+#### IAM Setup
 
 CloudPrint needs an IAM user with narrowly scoped permissions. The credentials can only access `cloudprint-*` SQS queues and nothing else.
 
-### 1. Create the IAM Policy
+**1. Create the IAM Policy**
 
 In the [IAM Console](https://console.aws.amazon.com/iam/), go to **Policies** → **Create policy** → **JSON** tab:
 
@@ -129,7 +154,7 @@ Name the policy `CloudPrintSQSAccess`.
 | `sqs:DeleteMessage` | Removes a message after successful printing |
 | `sts:GetCallerIdentity` | Validates credentials during installation |
 
-### 2. Create the IAM User
+**2. Create the IAM User**
 
 1. **Users** → **Create user** → name it `cloudprint-service`
 2. Do **not** enable console access
@@ -162,37 +187,6 @@ aws iam create-access-key --user-name cloudprint-service
 </details>
 
 For credential rotation and multi-machine setups, see the full [AWS Credentials Guide](docs/aws-credentials.md).
-
-## Security
-
-- **Credentials**: AWS access keys are stored in `appsettings.json` with file ACLs restricted to Administrators and SYSTEM only
-- **URL validation**: Only HTTPS URLs are accepted; loopback addresses are blocked (SSRF prevention)
-- **File validation**: Downloaded files are checked against magic bytes for the claimed content type
-- **File size limit**: Downloads are capped at 50MB
-- **Credential passing**: Install script passes credentials to the service binary via stdin (not visible in process listings)
-- **IAM scoping**: Credentials are scoped to `cloudprint-*` SQS queues only (see policy above)
-
-## Transports
-
-CloudPrint supports two transport modes, selected during install:
-
-### AWS SQS
-
-The default transport. See [AWS Credentials Guide](docs/aws-credentials.md) for IAM setup.
-
-```json
-{
-  "CloudPrint": {
-    "Transport": "sqs",
-    "QueueUrl": "https://sqs.us-east-2.amazonaws.com/123456789/cloudprint-HOSTNAME-PRINTER",
-    "Region": "us-east-2",
-    "AwsAccessKeyId": "AKIA...",
-    "AwsSecretAccessKey": "...",
-    "PrinterName": "Zebra_ZP500",
-    "VisibilityTimeoutSeconds": 300
-  }
-}
-```
 
 ### HTTP API
 
@@ -283,16 +277,25 @@ loop:
 
 No client-side poll interval is needed — the long-poll timeout IS the wait.
 
+## Security
+
+- **Credentials**: Stored in `appsettings.json` with file ACLs restricted to Administrators and SYSTEM only
+- **URL validation**: Only HTTPS URLs are accepted; loopback addresses are blocked (SSRF prevention)
+- **File validation**: Downloaded files are checked against magic bytes for the claimed content type
+- **File size limit**: Downloads are capped at 50MB
+- **Credential passing**: Install script passes credentials to the service binary via stdin (not visible in process listings)
+- **SQS IAM scoping**: AWS credentials are scoped to `cloudprint-*` SQS queues only
+
 ## Logging
 
 Logs are written to `C:\ProgramData\CloudPrint\logs\cloudprint-YYYYMMDD.log`. Rolling daily with 30-day retention.
 
 ## Reliability
 
-- **Dead letter queue**: Messages that fail 5 times are moved to a `-dlq` queue for investigation
 - **Auto-restart**: Service automatically restarts on failure (5s, 10s, 30s delays)
-- **Visibility timeout**: 300 seconds default — prevents double-printing during long jobs
-- **Message body logging**: Full message body logged on receipt for diagnostics
+- **Job logging**: Full job payload logged on receipt for diagnostics
+- **SQS**: Dead letter queue after 5 failed attempts; 300s visibility timeout prevents double-printing
+- **HTTP**: Server-side retry via ack timeout; failed jobs reported back via PATCH for server-side handling
 
 ## Uninstall
 
