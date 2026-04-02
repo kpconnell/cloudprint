@@ -85,12 +85,11 @@ if (-not $zipAsset) {
     exit 1
 }
 
-$tempDir = [System.IO.Path]::GetFullPath($env:TEMP)
-$tempZip = Join-Path $tempDir "cloudprint-latest.zip"
-$tempExtract = Join-Path $tempDir "cloudprint-extract"
+$tempZip = Join-Path $env:TEMP "cloudprint-latest.zip"
+$tempExtract = Join-Path $env:TEMP "cloudprint-extract"
 
 Invoke-WebRequest -Uri $zipAsset.browser_download_url -OutFile $tempZip
-if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
+if (Test-Path $tempExtract) { [System.IO.Directory]::Delete($tempExtract, $true) }
 Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
 
 # --- Load existing config before overwriting files ---
@@ -492,5 +491,5 @@ Write-Host "  To reconfigure, run this installer again." -ForegroundColor Cyan
 Write-Host "" -ForegroundColor Green
 
 # --- Cleanup ---
-try { if (Test-Path $tempZip) { Remove-Item $tempZip -Force } } catch {}
-try { if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force } } catch {}
+try { if (Test-Path $tempZip) { [System.IO.File]::Delete($tempZip) } } catch {}
+try { if (Test-Path $tempExtract) { [System.IO.Directory]::Delete($tempExtract, $true) } } catch {}
