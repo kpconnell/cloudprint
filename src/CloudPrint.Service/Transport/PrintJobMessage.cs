@@ -19,6 +19,14 @@ public class PrintJobMessage
     [JsonPropertyName("copies")]
     public int Copies { get; set; } = 1;
 
+    /// <summary>
+    /// Inline print content. For text-based content types (ZPL, text/plain) this is the raw string.
+    /// For binary content types (images) this must be base64-encoded.
+    /// When set, <see cref="FileUrl"/> is not required.
+    /// </summary>
+    [JsonPropertyName("content")]
+    public string? Content { get; set; }
+
     [JsonPropertyName("metadata")]
     public Dictionary<string, string>? Metadata { get; set; }
 }

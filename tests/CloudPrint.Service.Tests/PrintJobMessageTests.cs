@@ -46,6 +46,38 @@ public class PrintJobMessageTests
     }
 
     [Fact]
+    public void Deserializes_inline_content_message()
+    {
+        var json = """
+        {
+            "printerName": "Zebra_ZP500",
+            "contentType": "application/vnd.zebra.zpl",
+            "content": "^XA^FO50,50^FDHello^FS^XZ"
+        }
+        """;
+
+        var msg = JsonSerializer.Deserialize<PrintJobMessage>(json)!;
+
+        Assert.Equal("^XA^FO50,50^FDHello^FS^XZ", msg.Content);
+        Assert.Equal(string.Empty, msg.FileUrl);
+    }
+
+    [Fact]
+    public void Content_defaults_to_null()
+    {
+        var json = """
+        {
+            "fileUrl": "https://example.com/file.zpl",
+            "contentType": "application/vnd.zebra.zpl"
+        }
+        """;
+
+        var msg = JsonSerializer.Deserialize<PrintJobMessage>(json)!;
+
+        Assert.Null(msg.Content);
+    }
+
+    [Fact]
     public void Roundtrip_serialization()
     {
         var original = new PrintJobMessage

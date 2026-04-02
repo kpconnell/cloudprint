@@ -25,7 +25,7 @@ On reinstall, existing configuration is preserved — just press Enter to keep c
 ## How It Works
 
 1. CloudPrint long-polls for jobs (from SQS or your HTTP API, depending on transport)
-2. The file is downloaded from the HTTPS URL in the job
+2. The print content is resolved — either downloaded from the `fileUrl` or read directly from the inline `content` field
 3. The file is validated (magic bytes check against claimed content type)
 4. The file is sent to the configured printer
 5. On success, the job is acknowledged (deleted from SQS, or PATCH'd as completed via HTTP)
@@ -48,13 +48,49 @@ Jobs are JSON with the same shape regardless of transport:
 
 | Field | Required | Description |
 |---|---|---|
-| `fileUrl` | Yes | HTTPS URL to the file (signed or public) |
+| `fileUrl` | One of `fileUrl` or `content` required | HTTPS URL to the file (signed or public) |
+| `content` | One of `fileUrl` or `content` required | Inline print content (see below) |
 | `printerName` | No | Override the configured printer (optional) |
 | `contentType` | Yes | MIME type determining how the file is printed |
 | `copies` | No | Number of copies (default: 1) |
 | `metadata` | No | Arbitrary key-value pairs for your own tracking |
 
 For SQS, send this as the message body. For HTTP, your API returns this as the response body (with an additional `id` field).
+
+### Inline Content
+
+For small print jobs that fit within SQS message size limits (256 KB), you can embed the content directly in the `content` field instead of hosting a file and providing a `fileUrl`.
+
+- **Text-based content types** (`application/vnd.zebra.zpl`, `text/plain`): pass the content as a plain string
+- **Binary content types** (images): pass the content as a base64-encoded string
+
+If both `content` and `fileUrl` are provided, `content` takes priority and no download is performed.
+
+**ZPL example:**
+```json
+{
+  "contentType": "application/vnd.zebra.zpl",
+  "content": "^XA^FO50,50^ADN,36,20^FDHello World^FS^XZ"
+}
+```
+
+**Plain text example:**
+```json
+{
+  "contentType": "text/plain",
+  "content": "Order #12345\nShip to: 123 Main St\n"
+}
+```
+
+**Base64 image example:**
+```json
+{
+  "contentType": "image/png",
+  "content": "iVBORw0KGgoAAAANSUhEUgAA..."
+}
+```
+
+All validation (magic bytes, ZPL command blocking) applies equally to inline content.
 
 ### Supported Content Types
 
@@ -222,15 +258,23 @@ Server behavior:
 - When returning a job, move it from `ready` → `sent` (locked for processing)
 - If not acknowledged within a server-side timeout, return it to `ready`
 
-**200 Response:**
+**200 Response (file URL):**
 ```json
 {
   "id": "job-123",
   "fileUrl": "https://s3.amazonaws.com/bucket/label.zpl",
-  "printerName": "Zebra_ZP500",
   "contentType": "application/vnd.zebra.zpl",
-  "copies": 1,
-  "metadata": {}
+  "copies": 1
+}
+```
+
+**200 Response (inline content):**
+```json
+{
+  "id": "job-124",
+  "contentType": "application/vnd.zebra.zpl",
+  "content": "^XA^FO50,50^FDOrder 12345^FS^XZ",
+  "copies": 1
 }
 ```
 
