@@ -23,4 +23,8 @@ public class CloudPrintOptions
 
     // Shared
     public string PrinterName { get; set; } = string.Empty;
+
+    // Debug
+    public bool DumpPayloads { get; set; } = false;
+    public string DumpPath { get; set; } = @"C:\ProgramData\CloudPrint\dumps";
 }

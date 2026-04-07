@@ -388,10 +388,44 @@ Write-Host "  Queue: $queueUrl" -ForegroundColor Green
     }
 }
 
+# --- Debug logging ---
+$defaultDump = if ($existingConfig) { $existingConfig.CloudPrint.DumpPayloads } else { $false }
+$dumpLabel = if ($defaultDump) { 'Y/n' } else { 'y/N' }
+
+Write-Step "Debug Logging"
+Write-Host ""
+Write-Host "  When enabled, CloudPrint will:"
+Write-Host "    - Set log level to Debug"
+Write-Host "    - Save each job's JSON message and file content to disk"
+Write-Host "      (C:\ProgramData\CloudPrint\dumps\)"
+Write-Host ""
+$dumpAnswer = Read-Host "  Enable debug payload dumping? [$dumpLabel]"
+if ([string]::IsNullOrWhiteSpace($dumpAnswer)) {
+    $dumpPayloads = [bool]$defaultDump
+} elseif ($dumpAnswer -match '^[Yy]') {
+    $dumpPayloads = $true
+} else {
+    $dumpPayloads = $false
+}
+
+if ($dumpPayloads) {
+    Write-Host "  Debug payload dumping: ENABLED" -ForegroundColor Yellow
+} else {
+    Write-Host "  Debug payload dumping: disabled" -ForegroundColor Green
+}
+
 # --- Ensure log directory ---
 $logDir = "$env:ProgramData\CloudPrint\logs"
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+# --- Ensure dump directory ---
+if ($dumpPayloads) {
+    $dumpDir = "$env:ProgramData\CloudPrint\dumps"
+    if (-not (Test-Path $dumpDir)) {
+        New-Item -ItemType Directory -Path $dumpDir -Force | Out-Null
+    }
 }
 
 # --- Write config ---
@@ -400,6 +434,8 @@ Write-Step "Writing configuration..."
 $cloudPrintConfig = @{
     Transport = $transport
     PrinterName = $selectedPrinter
+    DumpPayloads = $dumpPayloads
+    DumpPath = 'C:\ProgramData\CloudPrint\dumps'
 }
 
 if ($transport -eq 'sqs') {
@@ -416,11 +452,13 @@ if ($transport -eq 'sqs') {
     $cloudPrintConfig.HttpPollTimeoutSeconds = 30
 }
 
+$serilogLevel = if ($dumpPayloads) { "Debug" } else { "Information" }
+
 $config = @{
     CloudPrint = $cloudPrintConfig
     Serilog = @{
         MinimumLevel = @{
-            Default = "Information"
+            Default = $serilogLevel
             Override = @{
                 Microsoft = "Warning"
                 System = "Warning"
@@ -486,6 +524,9 @@ if ($transport -eq 'sqs') {
     Write-Host "  Ack URL:   $ackUrl"
 }
 Write-Host "  Logs:      C:\ProgramData\CloudPrint\logs\"
+if ($dumpPayloads) {
+    Write-Host "  Dumps:     C:\ProgramData\CloudPrint\dumps\" -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "  To reconfigure, run this installer again." -ForegroundColor Cyan
 Write-Host "" -ForegroundColor Green
