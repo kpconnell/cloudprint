@@ -1,6 +1,6 @@
 namespace CloudPrint.Service.Printing;
 
-public class DryRunPrinter : IRawPrinter, IDocumentPrinter
+public class DryRunPrinter : IRawPrinter, IDocumentPrinter, IPdfPrinter
 {
     private readonly ILogger<DryRunPrinter> _logger;
 
@@ -21,5 +21,12 @@ public class DryRunPrinter : IRawPrinter, IDocumentPrinter
         var fileSize = new FileInfo(filePath).Length;
         _logger.LogInformation("[DRY RUN] Would print {ContentType} ({Bytes} bytes) to printer '{Printer}'",
             contentType, fileSize, printerName);
+    }
+
+    void IPdfPrinter.Print(string filePath, string printerName)
+    {
+        var fileSize = new FileInfo(filePath).Length;
+        _logger.LogInformation("[DRY RUN] Would print PDF ({Bytes} bytes) to printer '{Printer}'",
+            fileSize, printerName);
     }
 }

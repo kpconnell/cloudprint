@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-CloudPrint.Service-895b77a3-7dfe-41ca-bc27-72b3b001ab03</UserSecretsId>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +28,7 @@
 
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) or '$(RuntimeIdentifier)' == 'win-x64'">
     <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
   </ItemGroup>
 
 </Project>

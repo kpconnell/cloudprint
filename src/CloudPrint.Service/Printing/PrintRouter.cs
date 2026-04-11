@@ -4,6 +4,7 @@ public class PrintRouter
 {
     private readonly IRawPrinter _rawPrinter;
     private readonly IDocumentPrinter _documentPrinter;
+    private readonly IPdfPrinter _pdfPrinter;
     private readonly ILogger<PrintRouter> _logger;
 
     private static readonly HashSet<string> RawContentTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -21,10 +22,16 @@ public class PrintRouter
         "image/tiff"
     };
 
-    public PrintRouter(IRawPrinter rawPrinter, IDocumentPrinter documentPrinter, ILogger<PrintRouter> logger)
+    private static readonly HashSet<string> PdfContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/pdf"
+    };
+
+    public PrintRouter(IRawPrinter rawPrinter, IDocumentPrinter documentPrinter, IPdfPrinter pdfPrinter, ILogger<PrintRouter> logger)
     {
         _rawPrinter = rawPrinter;
         _documentPrinter = documentPrinter;
+        _pdfPrinter = pdfPrinter;
         _logger = logger;
     }
 
@@ -39,6 +46,11 @@ public class PrintRouter
         {
             _logger.LogDebug("Routing {ContentType} to document printer", contentType);
             _documentPrinter.Print(filePath, printerName, contentType);
+        }
+        else if (PdfContentTypes.Contains(contentType))
+        {
+            _logger.LogDebug("Routing {ContentType} to PDF printer", contentType);
+            _pdfPrinter.Print(filePath, printerName);
         }
         else
         {

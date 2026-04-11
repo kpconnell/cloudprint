@@ -148,6 +148,7 @@ public class JobProcessor : IJobProcessor
         "image/bmp" => ".bmp",
         "image/gif" => ".gif",
         "image/tiff" => ".tiff",
+        "application/pdf" => ".pdf",
         _ => ".bin"
     };
 

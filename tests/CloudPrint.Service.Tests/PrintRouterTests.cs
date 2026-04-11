@@ -8,6 +8,7 @@ public class PrintRouterTests
 {
     private readonly Mock<IRawPrinter> _rawPrinter = new();
     private readonly Mock<IDocumentPrinter> _docPrinter = new();
+    private readonly Mock<IPdfPrinter> _pdfPrinter = new();
     private readonly PrintRouter _router;
 
     public PrintRouterTests()
@@ -15,6 +16,7 @@ public class PrintRouterTests
         _router = new PrintRouter(
             _rawPrinter.Object,
             _docPrinter.Object,
+            _pdfPrinter.Object,
             NullLogger<PrintRouter>.Instance);
     }
 
@@ -76,6 +78,7 @@ public class PrintRouterTests
     [InlineData("APPLICATION/VND.ZEBRA.ZPL")]
     [InlineData("Image/PNG")]
     [InlineData("Image/JPEG")]
+    [InlineData("Application/PDF")]
     public void Content_type_matching_is_case_insensitive(string contentType)
     {
         var tempFile = Path.GetTempFileName();
@@ -83,8 +86,25 @@ public class PrintRouterTests
         {
             _router.Print(tempFile, "TestPrinter", contentType);
             // Should not throw — just verify it was routed somewhere
-            var totalCalls = _rawPrinter.Invocations.Count + _docPrinter.Invocations.Count;
+            var totalCalls = _rawPrinter.Invocations.Count + _docPrinter.Invocations.Count + _pdfPrinter.Invocations.Count;
             Assert.Equal(1, totalCalls);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void Routes_pdf_to_pdf_printer()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            _router.Print(tempFile, "TestPrinter", "application/pdf");
+            _pdfPrinter.Verify(p => p.Print(tempFile, "TestPrinter"), Times.Once);
+            _rawPrinter.Verify(p => p.PrintRaw(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            _docPrinter.Verify(p => p.Print(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
         finally
         {

@@ -36,4 +36,25 @@ public class DryRunPrinterTests
             File.Delete(tempFile);
         }
     }
+
+    [Fact]
+    public void DryRunPrinter_implements_IPdfPrinter()
+    {
+        Assert.IsAssignableFrom<IPdfPrinter>(_printer);
+    }
+
+    [Fact]
+    public void PrintPdf_does_not_throw()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(tempFile, new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31 }); // %PDF-1
+            ((IPdfPrinter)_printer).Print(tempFile, "FakePrinter");
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
 }

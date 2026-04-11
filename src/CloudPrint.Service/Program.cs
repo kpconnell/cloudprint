@@ -104,12 +104,14 @@ try
         builder.Services.AddSingleton<DryRunPrinter>();
         builder.Services.AddSingleton<IRawPrinter>(sp => sp.GetRequiredService<DryRunPrinter>());
         builder.Services.AddSingleton<IDocumentPrinter>(sp => sp.GetRequiredService<DryRunPrinter>());
+        builder.Services.AddSingleton<IPdfPrinter>(sp => sp.GetRequiredService<DryRunPrinter>());
     }
 #if WINDOWS
     else
     {
         builder.Services.AddSingleton<IRawPrinter, RawPrinter>();
         builder.Services.AddSingleton<IDocumentPrinter, DocumentPrinter>();
+        builder.Services.AddSingleton<IPdfPrinter, PdfPrinter>();
     }
 #endif
 

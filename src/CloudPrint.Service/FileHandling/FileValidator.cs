@@ -14,6 +14,7 @@ public static partial class FileValidator
         ["image/gif"] = bytes => HasMagicBytes(bytes, [0x47, 0x49, 0x46]),
         ["image/tiff"] = bytes => HasMagicBytes(bytes, [0x49, 0x49, 0x2A, 0x00]) ||
                                   HasMagicBytes(bytes, [0x4D, 0x4D, 0x00, 0x2A]),
+        ["application/pdf"] = bytes => HasMagicBytes(bytes, [0x25, 0x50, 0x44, 0x46]),
     };
 
     // ZPL commands that can modify printer firmware, configuration, or stored objects.

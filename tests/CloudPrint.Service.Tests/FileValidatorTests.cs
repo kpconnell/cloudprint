@@ -182,6 +182,29 @@ public class FileValidatorTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public void Validates_pdf_magic_bytes()
+    {
+        var path = WriteTempBytes([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34]); // %PDF-1.4
+        try
+        {
+            Assert.True(FileValidator.Validate(path, "application/pdf", out _));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Rejects_non_pdf_bytes_as_pdf()
+    {
+        var path = WriteTempBytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]); // PNG bytes, not PDF
+        try
+        {
+            Assert.False(FileValidator.Validate(path, "application/pdf", out var reason));
+            Assert.Contains("does not match", reason);
+        }
+        finally { File.Delete(path); }
+    }
+
     private static string WriteTempFile(string content)
     {
         var path = Path.GetTempFileName();

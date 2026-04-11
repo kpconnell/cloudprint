@@ -12,6 +12,7 @@ public class JobProcessorTests
 {
     private readonly Mock<IRawPrinter> _rawPrinter = new();
     private readonly Mock<IDocumentPrinter> _docPrinter = new();
+    private readonly Mock<IPdfPrinter> _pdfPrinter = new();
     private readonly CloudPrintOptions _options = new() { PrinterName = "DefaultPrinter" };
 
     private JobProcessor CreateProcessor(string httpContent = "^XA^FO50,50^FDTest^FS^XZ")
@@ -19,7 +20,7 @@ public class JobProcessorTests
         var handler = new MockHttpHandler(httpContent);
         var httpClient = new HttpClient(handler);
         var downloader = new FileDownloader(httpClient, NullLogger<FileDownloader>.Instance);
-        var router = new PrintRouter(_rawPrinter.Object, _docPrinter.Object, NullLogger<PrintRouter>.Instance);
+        var router = new PrintRouter(_rawPrinter.Object, _docPrinter.Object, _pdfPrinter.Object, NullLogger<PrintRouter>.Instance);
         return new JobProcessor(
             Options.Create(_options),
             downloader,
@@ -118,7 +119,7 @@ public class JobProcessorTests
         var handler = new MockHttpHandler(statusCode: System.Net.HttpStatusCode.NotFound);
         var httpClient = new HttpClient(handler);
         var downloader = new FileDownloader(httpClient, NullLogger<FileDownloader>.Instance);
-        var router = new PrintRouter(_rawPrinter.Object, _docPrinter.Object, NullLogger<PrintRouter>.Instance);
+        var router = new PrintRouter(_rawPrinter.Object, _docPrinter.Object, _pdfPrinter.Object, NullLogger<PrintRouter>.Instance);
         var processor = new JobProcessor(
             Options.Create(_options), downloader, router, NullLogger<JobProcessor>.Instance);
 
@@ -266,6 +267,63 @@ public class JobProcessorTests
         // Verify no cloudprint temp files remain
         var tempFiles = Directory.GetFiles(Path.GetTempPath(), "cloudprint-*");
         Assert.Empty(tempFiles);
+    }
+
+    [Fact]
+    public async Task Successful_pdf_fileUrl_job_returns_success()
+    {
+        // Minimal valid PDF: %PDF-1.4
+        var pdfContent = "%PDF-1.4\n%EOF";
+        var processor = CreateProcessor(pdfContent);
+        var job = new PrintJobMessage
+        {
+            FileUrl = "https://example.com/document.pdf",
+            ContentType = "application/pdf",
+            Copies = 1
+        };
+
+        var (success, error) = await processor.ProcessAsync("pdf-job-1", job, CancellationToken.None);
+
+        Assert.True(success);
+        Assert.Null(error);
+        _pdfPrinter.Verify(p => p.Print(It.IsAny<string>(), "DefaultPrinter"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Inline_pdf_base64_content_prints_successfully()
+    {
+        var processor = CreateProcessor();
+        var pdfBytes = new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34 }; // %PDF-1.4
+        var job = new PrintJobMessage
+        {
+            ContentType = "application/pdf",
+            Content = Convert.ToBase64String(pdfBytes)
+        };
+
+        var (success, error) = await processor.ProcessAsync("pdf-job-inline-1", job, CancellationToken.None);
+
+        Assert.True(success);
+        Assert.Null(error);
+        _pdfPrinter.Verify(p => p.Print(It.IsAny<string>(), "DefaultPrinter"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Invalid_pdf_bytes_returns_validation_failure()
+    {
+        var processor = CreateProcessor();
+        // Serve PNG bytes as application/pdf — should fail validation
+        var pngBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        var job = new PrintJobMessage
+        {
+            ContentType = "application/pdf",
+            Content = Convert.ToBase64String(pngBytes)
+        };
+
+        var (success, error) = await processor.ProcessAsync("pdf-job-invalid-1", job, CancellationToken.None);
+
+        Assert.False(success);
+        Assert.NotNull(error);
+        _pdfPrinter.Verify(p => p.Print(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     private class MockHttpHandler : HttpMessageHandler
