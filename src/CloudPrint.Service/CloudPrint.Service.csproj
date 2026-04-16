@@ -27,6 +27,7 @@
   </PropertyGroup>
 
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) or '$(RuntimeIdentifier)' == 'win-x64'">
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.6" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
   </ItemGroup>
