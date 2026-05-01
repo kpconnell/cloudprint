@@ -4,8 +4,10 @@ using System.Drawing.Imaging;
 using System.Drawing.Printing;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using CloudPrint.Service.Configuration;
 using Docnet.Core;
 using Docnet.Core.Models;
+using Microsoft.Extensions.Options;
 
 namespace CloudPrint.Service.Printing;
 
@@ -13,16 +15,23 @@ namespace CloudPrint.Service.Printing;
 public class PdfPrinter : IPdfPrinter
 {
     private readonly ILogger<PdfPrinter> _logger;
+    private readonly CloudPrintOptions _options;
 
-    public PdfPrinter(ILogger<PdfPrinter> logger) => _logger = logger;
+    public PdfPrinter(ILogger<PdfPrinter> logger, IOptions<CloudPrintOptions> options)
+    {
+        _logger = logger;
+        _options = options.Value;
+    }
 
     public void Print(string filePath, string printerName)
     {
         ValidatePrinterExists(printerName);
 
-        // Render at 300 DPI (scale factor from PDF's native 72 DPI)
-        const double dpi = 300.0;
-        const double scaleFactor = dpi / 72.0;
+        // Scale factor from PDF's native 72 DPI to configured render DPI
+        var dpi = _options.PdfRenderDpi > 0 ? _options.PdfRenderDpi : 300;
+        var scaleFactor = dpi / 72.0;
+        var fitToPhysicalPage = string.Equals(
+            _options.PdfFitMode, "PhysicalPage", StringComparison.OrdinalIgnoreCase);
 
         // DocLib.Instance is a process-wide singleton — do NOT dispose it
         var pdfDoc = DocLib.Instance.GetDocReader(filePath, new PageDimensions(scaleFactor));
@@ -62,7 +71,7 @@ public class PdfPrinter : IPdfPrinter
                 {
                     if (e.Graphics is null) return;
                     var page = pages[pageIndex];
-                    var dest = e.MarginBounds;
+                    var dest = fitToPhysicalPage ? e.PageBounds : e.MarginBounds;
                     var scale = Math.Min(
                         (float)dest.Width / page.Width,
                         (float)dest.Height / page.Height);

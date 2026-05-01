@@ -24,6 +24,12 @@ public class CloudPrintOptions
     // Shared
     public string PrinterName { get; set; } = string.Empty;
 
+    // PDF printing
+    // PdfRenderDpi: rasterization DPI (203 typical for thermal label printers, 300 for office)
+    // PdfFitMode: "Margins" (fit within driver-reported margins) or "PhysicalPage" (edge-to-edge)
+    public int PdfRenderDpi { get; set; } = 300;
+    public string PdfFitMode { get; set; } = "Margins";
+
     // Debug
     public bool DumpPayloads { get; set; } = false;
     public string DumpPath { get; set; } = @"C:\ProgramData\CloudPrint\dumps";

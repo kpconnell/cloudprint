@@ -388,6 +388,55 @@ Write-Host "  Queue: $queueUrl" -ForegroundColor Green
     }
 }
 
+# --- PDF print settings ---
+$defaultPdfDpi = if ($existingConfig -and $existingConfig.CloudPrint.PdfRenderDpi) { [int]$existingConfig.CloudPrint.PdfRenderDpi } else { 300 }
+$defaultPdfFit = if ($existingConfig -and $existingConfig.CloudPrint.PdfFitMode) { $existingConfig.CloudPrint.PdfFitMode } else { 'Margins' }
+
+Write-Step "PDF Print Settings"
+Write-Host ""
+Write-Host "  Controls how PDFs are rasterized and laid out on the page."
+Write-Host "  Defaults are good for office printers; adjust for thermal/label printers."
+Write-Host ""
+Write-Host "  Current: ${defaultPdfDpi} DPI, fit to ${defaultPdfFit}"
+Write-Host ""
+$customizePdf = Read-Host "  Customize PDF settings? [y/N]"
+if ($customizePdf -match '^[Yy]') {
+    $dpiInput = Read-Host "  Render DPI (203 for thermal labels, 300 office, 600 high-fidelity) [$defaultPdfDpi]"
+    if ([string]::IsNullOrWhiteSpace($dpiInput)) {
+        $pdfDpi = $defaultPdfDpi
+    } else {
+        $parsedDpi = 0
+        if ([int]::TryParse($dpiInput, [ref]$parsedDpi) -and $parsedDpi -ge 72 -and $parsedDpi -le 1200) {
+            $pdfDpi = $parsedDpi
+        } else {
+            Write-Error "DPI must be an integer between 72 and 1200."
+            exit 1
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Fit mode:"
+    Write-Host "    1) Margins      — fit within driver-reported margins (office printers)"
+    Write-Host "    2) PhysicalPage — edge-to-edge, ignore margins (thermal label printers)"
+    Write-Host ""
+    $fitInput = Read-Host "  Select fit mode (1-2) [keep $defaultPdfFit]"
+    if ([string]::IsNullOrWhiteSpace($fitInput)) {
+        $pdfFit = $defaultPdfFit
+    } elseif ($fitInput -eq '1') {
+        $pdfFit = 'Margins'
+    } elseif ($fitInput -eq '2') {
+        $pdfFit = 'PhysicalPage'
+    } else {
+        Write-Error "Invalid selection."
+        exit 1
+    }
+
+    Write-Host "  Selected: $pdfDpi DPI, $pdfFit" -ForegroundColor Green
+} else {
+    $pdfDpi = $defaultPdfDpi
+    $pdfFit = $defaultPdfFit
+}
+
 # --- Debug logging ---
 $defaultDump = if ($existingConfig) { $existingConfig.CloudPrint.DumpPayloads } else { $false }
 $dumpLabel = if ($defaultDump) { 'Y/n' } else { 'y/N' }
@@ -434,6 +483,8 @@ Write-Step "Writing configuration..."
 $cloudPrintConfig = @{
     Transport = $transport
     PrinterName = $selectedPrinter
+    PdfRenderDpi = $pdfDpi
+    PdfFitMode = $pdfFit
     DumpPayloads = $dumpPayloads
     DumpPath = 'C:\ProgramData\CloudPrint\dumps'
 }

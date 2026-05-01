@@ -103,8 +103,18 @@ All validation (magic bytes, ZPL command blocking) applies equally to inline con
 | `image/bmp` | Printed as image | BMP magic bytes |
 | `image/gif` | Printed as image | GIF magic bytes |
 | `image/tiff` | Printed as image | TIFF magic bytes |
+| `application/pdf` | Rasterized via PDFium and printed | PDF magic bytes (`%PDF`) |
 
-**Planned:** `application/pdf` — not yet supported. Contributions welcome.
+### PDF Print Settings
+
+PDFs are rasterized to a bitmap, then sent through the Windows printing pipeline. Two settings tune this:
+
+| Setting | Default | Notes |
+|---|---|---|
+| `PdfRenderDpi` | `300` | Rasterization resolution. `203` for thermal label printers, `300` for office, `600` for high-fidelity reports. Higher DPI = more memory per page. |
+| `PdfFitMode` | `Margins` | `Margins` fits within the driver-reported page margins (office printers). `PhysicalPage` prints edge-to-edge ignoring margins (thermal/label printers). |
+
+The installer prompts for these under "PDF Print Settings". Defaults are kept on reinstall. To change them later without reinstalling, edit `appsettings.json` and restart the service.
 
 ## Transports
 
