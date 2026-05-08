@@ -6,6 +6,8 @@
             "Effect": "Allow",
             "Action": [
                 "sqs:CreateQueue",
+                "sqs:DeleteQueue",
+                "sqs:TagQueue",
                 "sqs:SetQueueAttributes",
                 "sqs:GetQueueAttributes",
                 "sqs:GetQueueUrl",
@@ -13,6 +15,12 @@
                 "sqs:DeleteMessage"
             ],
             "Resource": "arn:aws:sqs:*:*:cloudprint-*"
+        },
+        {
+            "Sid": "CloudPrintQueueDiscovery",
+            "Effect": "Allow",
+            "Action": "sqs:ListQueues",
+            "Resource": "*"
         },
         {
             "Sid": "CloudPrintCredentialVerification",

@@ -3,8 +3,8 @@
 A Windows Service that receives print jobs from the cloud and routes them to local printers. Designed for environments where cloud applications need to print to on-premise printers (shipping labels, receipts, documents).
 
 Supports two transport modes:
-- **AWS SQS** — polls an SQS queue for jobs (auto-provisioned per machine/printer)
-- **HTTP API** — long-polls your own API for jobs (bring your own server)
+- **AWS SQS** — polls SQS queues for jobs (auto-provisioned per machine/printer; multiple printers per machine supported)
+- **HTTP API** — long-polls your own API for jobs (single printer; bring your own server)
 
 ## Quick Install
 
@@ -122,21 +122,49 @@ CloudPrint supports two transport modes, selected during install.
 
 ### AWS SQS
 
-The default transport. The installer auto-creates an SQS queue pair per machine/printer.
+The default transport. The installer auto-creates an SQS queue pair per machine/printer. Multiple printers per machine are supported — each printer gets its own queue, with a per-lane `PdfRenderDpi`/`PdfFitMode` override (top-level values are the fallback). On reinstall, all queues for the machine are deleted and recreated from the new printer list.
 
 ```json
 {
   "CloudPrint": {
     "Transport": "sqs",
-    "QueueUrl": "https://sqs.us-east-2.amazonaws.com/123456789/cloudprint-HOSTNAME-PRINTER",
     "Region": "us-east-2",
     "AwsAccessKeyId": "AKIA...",
     "AwsSecretAccessKey": "...",
-    "PrinterName": "Zebra_ZP500",
-    "VisibilityTimeoutSeconds": 300
+    "VisibilityTimeoutSeconds": 300,
+    "PdfRenderDpi": 300,
+    "PdfFitMode": "Margins",
+    "Printers": [
+      {
+        "PrinterName": "Zebra_ZP500",
+        "QueueUrl": "https://sqs.us-east-2.amazonaws.com/123456789/cloudprint-warehouse-pc1-zebra-zp500",
+        "PdfRenderDpi": 203,
+        "PdfFitMode": "PhysicalPage"
+      },
+      {
+        "PrinterName": "HP_LaserJet_Pro",
+        "QueueUrl": "https://sqs.us-east-2.amazonaws.com/123456789/cloudprint-warehouse-pc1-hp-laserjet-pro"
+      }
+    ]
   }
 }
 ```
+
+Legacy single-printer configs (top-level `QueueUrl` + `PrinterName`, no `Printers` array) continue to work without reinstalling — they auto-promote to a single lane at startup.
+
+When the job-level `printerName` field is set on a job pulled from a multi-printer queue, it is ignored with a warning: the queue → printer binding is the contract.
+
+#### Discovering printers from the cloud side
+
+Each queue is tagged on creation:
+
+| Tag | Value |
+|---|---|
+| `Application` | `cloudprint` |
+| `Hostname` | `WAREHOUSE-PC1` (raw hostname) |
+| `PrinterName` | `Zebra ZP500` (raw printer name) |
+
+Senders enumerate available printers with `ListQueues(QueueNamePrefix=cloudprint-)` followed by `ListQueueTags` per queue URL. Hostname/printer tags carry the original casing and spaces, since the queue name itself sanitizes those.
 
 #### Queue Naming
 
@@ -170,6 +198,8 @@ In the [IAM Console](https://console.aws.amazon.com/iam/), go to **Policies** �
             "Effect": "Allow",
             "Action": [
                 "sqs:CreateQueue",
+                "sqs:DeleteQueue",
+                "sqs:TagQueue",
                 "sqs:SetQueueAttributes",
                 "sqs:GetQueueAttributes",
                 "sqs:GetQueueUrl",
@@ -177,6 +207,12 @@ In the [IAM Console](https://console.aws.amazon.com/iam/), go to **Policies** �
                 "sqs:DeleteMessage"
             ],
             "Resource": "arn:aws:sqs:*:*:cloudprint-*"
+        },
+        {
+            "Sid": "CloudPrintQueueDiscovery",
+            "Effect": "Allow",
+            "Action": "sqs:ListQueues",
+            "Resource": "*"
         },
         {
             "Sid": "CloudPrintCredentialVerification",
@@ -192,13 +228,18 @@ Name the policy `CloudPrintSQSAccess`.
 
 | Action | Why |
 |--------|-----|
-| `sqs:CreateQueue` | Installer auto-creates the main queue + dead-letter queue |
+| `sqs:CreateQueue` | Installer auto-creates main queue + dead-letter queue per printer |
+| `sqs:DeleteQueue` | Reinstall wipes existing `cloudprint-{hostname}-*` queues before recreating |
+| `sqs:TagQueue` | Stamps each queue with `Application`/`Hostname`/`PrinterName` tags for discovery |
 | `sqs:SetQueueAttributes` | Sets the redrive policy (DLQ) on existing queues |
 | `sqs:GetQueueAttributes` | Reads the DLQ ARN to wire up the redrive policy |
 | `sqs:GetQueueUrl` | Looks up the queue URL when it already exists |
+| `sqs:ListQueues` | Finds existing `cloudprint-{hostname}-*` queues on reinstall (no resource scoping for list ops) |
 | `sqs:ReceiveMessage` | Long-polls the queue for print jobs |
 | `sqs:DeleteMessage` | Removes a message after successful printing |
 | `sts:GetCallerIdentity` | Validates credentials during installation |
+
+> Note: `ListQueueTags` is not in this policy — that permission belongs to whatever **sends** print jobs (so it can discover what printers are available), not the CloudPrint service itself.
 
 **2. Create the IAM User**
 

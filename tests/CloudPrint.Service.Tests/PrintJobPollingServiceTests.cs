@@ -1,7 +1,5 @@
-using CloudPrint.Service.Configuration;
 using CloudPrint.Service.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace CloudPrint.Service.Tests;
@@ -10,7 +8,10 @@ public class PrintJobPollingServiceTests
 {
     private readonly Mock<IJobSource> _jobSource = new();
     private readonly Mock<IJobProcessor> _processor = new();
-    private readonly CloudPrintOptions _options = new() { Transport = "sqs", PrinterName = "TestPrinter" };
+
+    private PrintJobPollingService Create() =>
+        new(_jobSource.Object, _processor.Object, "test/lane",
+            NullLogger<PrintJobPollingService>.Instance);
 
     [Fact]
     public async Task Processes_job_and_acknowledges_success()
@@ -33,16 +34,14 @@ public class PrintJobPollingServiceTests
         _processor.Setup(p => p.ProcessAsync("job-1", job, It.IsAny<CancellationToken>()))
             .ReturnsAsync((true, (string?)null));
 
-        var service = new PrintJobPollingService(
-            _jobSource.Object, _processor.Object, Options.Create(_options),
-            NullLogger<PrintJobPollingService>.Instance);
+        var service = Create();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await service.StartAsync(cts.Token);
         await Task.Delay(500);
         await service.StopAsync(CancellationToken.None);
 
-        _jobSource.Verify(s => s.AcknowledgeAsync("job-1", true, null, It.IsAny<CancellationToken>()), Times.Once);
+        _jobSource.Verify(s => s.AcknowledgeAsync(envelope, true, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -66,16 +65,14 @@ public class PrintJobPollingServiceTests
         _processor.Setup(p => p.ProcessAsync("job-2", job, It.IsAny<CancellationToken>()))
             .ReturnsAsync((false, "Validation failed"));
 
-        var service = new PrintJobPollingService(
-            _jobSource.Object, _processor.Object, Options.Create(_options),
-            NullLogger<PrintJobPollingService>.Instance);
+        var service = Create();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         await service.StartAsync(cts.Token);
         await Task.Delay(500);
         await service.StopAsync(CancellationToken.None);
 
-        _jobSource.Verify(s => s.AcknowledgeAsync("job-2", false, "Validation failed", It.IsAny<CancellationToken>()), Times.Once);
+        _jobSource.Verify(s => s.AcknowledgeAsync(envelope, false, "Validation failed", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -84,9 +81,7 @@ public class PrintJobPollingServiceTests
         _jobSource.Setup(s => s.ReceiveAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((JobEnvelope?)null);
 
-        var service = new PrintJobPollingService(
-            _jobSource.Object, _processor.Object, Options.Create(_options),
-            NullLogger<PrintJobPollingService>.Instance);
+        var service = Create();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         await service.StartAsync(cts.Token);
@@ -118,9 +113,7 @@ public class PrintJobPollingServiceTests
         _processor.Setup(p => p.ProcessAsync("job-3", job, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Boom"));
 
-        var service = new PrintJobPollingService(
-            _jobSource.Object, _processor.Object, Options.Create(_options),
-            NullLogger<PrintJobPollingService>.Instance);
+        var service = Create();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         await service.StartAsync(cts.Token);

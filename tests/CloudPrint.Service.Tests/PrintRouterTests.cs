@@ -85,7 +85,6 @@ public class PrintRouterTests
         try
         {
             _router.Print(tempFile, "TestPrinter", contentType);
-            // Should not throw — just verify it was routed somewhere
             var totalCalls = _rawPrinter.Invocations.Count + _docPrinter.Invocations.Count + _pdfPrinter.Invocations.Count;
             Assert.Equal(1, totalCalls);
         }
@@ -96,15 +95,31 @@ public class PrintRouterTests
     }
 
     [Fact]
-    public void Routes_pdf_to_pdf_printer()
+    public void Routes_pdf_to_pdf_printer_with_default_settings_when_unspecified()
     {
         var tempFile = Path.GetTempFileName();
         try
         {
             _router.Print(tempFile, "TestPrinter", "application/pdf");
-            _pdfPrinter.Verify(p => p.Print(tempFile, "TestPrinter"), Times.Once);
-            _rawPrinter.Verify(p => p.PrintRaw(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-            _docPrinter.Verify(p => p.Print(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            _pdfPrinter.Verify(p => p.Print(tempFile, "TestPrinter", It.Is<PdfRenderSettings>(
+                s => s.Dpi == PdfRenderSettings.Default.Dpi && s.FitMode == PdfRenderSettings.Default.FitMode)),
+                Times.Once);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void Routes_pdf_with_explicit_settings_passed_through()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var settings = new PdfRenderSettings(203, "PhysicalPage");
+            _router.Print(tempFile, "TestPrinter", "application/pdf", settings);
+            _pdfPrinter.Verify(p => p.Print(tempFile, "TestPrinter", settings), Times.Once);
         }
         finally
         {

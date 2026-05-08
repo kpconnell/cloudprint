@@ -88,13 +88,16 @@ public class HttpApiJobSourceTests
         Assert.Contains("timeout=5", handler.LastRequest.RequestUri!.ToString());
     }
 
+    private static JobEnvelope EnvelopeFor(string id) =>
+        new() { Id = id, Job = new PrintJobMessage() };
+
     [Fact]
     public async Task Acknowledge_success_sends_completed_patch()
     {
         var handler = new MockApiHandler(HttpStatusCode.OK);
         var source = CreateSource(handler);
 
-        await source.AcknowledgeAsync("job-123", true, null, CancellationToken.None);
+        await source.AcknowledgeAsync(EnvelopeFor("job-123"), true, null, CancellationToken.None);
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(HttpMethod.Patch, handler.LastRequest.Method);
@@ -110,7 +113,7 @@ public class HttpApiJobSourceTests
         var handler = new MockApiHandler(HttpStatusCode.OK);
         var source = CreateSource(handler);
 
-        await source.AcknowledgeAsync("job-456", false, "Printer not found", CancellationToken.None);
+        await source.AcknowledgeAsync(EnvelopeFor("job-456"), false, "Printer not found", CancellationToken.None);
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(HttpMethod.Patch, handler.LastRequest.Method);
@@ -126,7 +129,7 @@ public class HttpApiJobSourceTests
         var handler = new MockApiHandler(HttpStatusCode.OK);
         var source = CreateSource(handler);
 
-        await source.AcknowledgeAsync("job-789", true, null, CancellationToken.None);
+        await source.AcknowledgeAsync(EnvelopeFor("job-789"), true, null, CancellationToken.None);
 
         Assert.True(handler.LastRequest!.Headers.Contains("X-Api-Key"));
         Assert.Equal("test-key-123", handler.LastRequest.Headers.GetValues("X-Api-Key").First());

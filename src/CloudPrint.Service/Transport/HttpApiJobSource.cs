@@ -74,8 +74,9 @@ public class HttpApiJobSource : IJobSource
         };
     }
 
-    public async Task AcknowledgeAsync(string jobId, bool success, string? error, CancellationToken cancellationToken)
+    public async Task AcknowledgeAsync(JobEnvelope envelope, bool success, string? error, CancellationToken cancellationToken)
     {
+        var jobId = envelope.Id;
         var url = $"{_options.AckUrl.TrimEnd('/')}/{jobId}";
 
         var payload = success

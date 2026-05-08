@@ -35,7 +35,7 @@ public class PrintRouter
         _logger = logger;
     }
 
-    public void Print(string filePath, string printerName, string contentType)
+    public void Print(string filePath, string printerName, string contentType, PdfRenderSettings? pdfSettings = null)
     {
         if (RawContentTypes.Contains(contentType))
         {
@@ -50,7 +50,7 @@ public class PrintRouter
         else if (PdfContentTypes.Contains(contentType))
         {
             _logger.LogDebug("Routing {ContentType} to PDF printer", contentType);
-            _pdfPrinter.Print(filePath, printerName);
+            _pdfPrinter.Print(filePath, printerName, pdfSettings ?? PdfRenderSettings.Default);
         }
         else
         {

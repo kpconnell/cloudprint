@@ -23,10 +23,10 @@ public class DryRunPrinter : IRawPrinter, IDocumentPrinter, IPdfPrinter
             contentType, fileSize, printerName);
     }
 
-    void IPdfPrinter.Print(string filePath, string printerName)
+    void IPdfPrinter.Print(string filePath, string printerName, PdfRenderSettings settings)
     {
         var fileSize = new FileInfo(filePath).Length;
-        _logger.LogInformation("[DRY RUN] Would print PDF ({Bytes} bytes) to printer '{Printer}'",
-            fileSize, printerName);
+        _logger.LogInformation("[DRY RUN] Would print PDF ({Bytes} bytes, {Dpi} DPI, {FitMode}) to printer '{Printer}'",
+            fileSize, settings.Dpi, settings.FitMode, printerName);
     }
 }

@@ -1,32 +1,27 @@
-using CloudPrint.Service.Configuration;
-using Microsoft.Extensions.Options;
-
 namespace CloudPrint.Service.Transport;
 
 public class PrintJobPollingService : BackgroundService
 {
     private readonly IJobSource _jobSource;
     private readonly IJobProcessor _processor;
-    private readonly CloudPrintOptions _options;
+    private readonly string _identifier;
     private readonly ILogger<PrintJobPollingService> _logger;
 
     public PrintJobPollingService(
         IJobSource jobSource,
         IJobProcessor processor,
-        IOptions<CloudPrintOptions> options,
+        string identifier,
         ILogger<PrintJobPollingService> logger)
     {
         _jobSource = jobSource;
         _processor = processor;
-        _options = options.Value;
+        _identifier = identifier;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
-            "CloudPrint service starting. Transport: {Transport}, Printer: {PrinterName}",
-            _options.Transport, _options.PrinterName);
+        _logger.LogInformation("CloudPrint polling loop starting: {Identifier}", _identifier);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -39,13 +34,7 @@ public class PrintJobPollingService : BackgroundService
                 var (success, error) = await _processor.ProcessAsync(
                     envelope.Id, envelope.Job, stoppingToken);
 
-                // For SQS, delete the message on success (needs receipt handle)
-                if (success && _jobSource is SqsJobSource sqsSource && envelope.ReceiptHandle is not null)
-                {
-                    await sqsSource.DeleteMessageAsync(envelope.ReceiptHandle, stoppingToken);
-                }
-
-                await _jobSource.AcknowledgeAsync(envelope.Id, success, error, stoppingToken);
+                await _jobSource.AcknowledgeAsync(envelope, success, error, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -53,11 +42,11 @@ public class PrintJobPollingService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in print job polling loop");
+                _logger.LogError(ex, "[{Identifier}] Error in print job polling loop", _identifier);
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
 
-        _logger.LogInformation("CloudPrint service stopping");
+        _logger.LogInformation("CloudPrint polling loop stopping: {Identifier}", _identifier);
     }
 }

@@ -50,7 +50,22 @@ public class DryRunPrinterTests
         try
         {
             File.WriteAllBytes(tempFile, new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31 }); // %PDF-1
-            ((IPdfPrinter)_printer).Print(tempFile, "FakePrinter");
+            ((IPdfPrinter)_printer).Print(tempFile, "FakePrinter", new PdfRenderSettings(300, "Margins"));
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void PrintPdf_accepts_per_lane_settings()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(tempFile, new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31 });
+            ((IPdfPrinter)_printer).Print(tempFile, "ThermalPrinter", new PdfRenderSettings(203, "PhysicalPage"));
         }
         finally
         {

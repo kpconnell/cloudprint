@@ -2,23 +2,25 @@ using System.Text.Json;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using CloudPrint.Service.Configuration;
-using Microsoft.Extensions.Options;
 
 namespace CloudPrint.Service.Transport;
 
 public class SqsJobSource : IJobSource
 {
     private readonly IAmazonSQS _sqsClient;
-    private readonly CloudPrintOptions _options;
+    private readonly ResolvedLane _lane;
+    private readonly int _visibilityTimeoutSeconds;
     private readonly ILogger<SqsJobSource> _logger;
 
     public SqsJobSource(
         IAmazonSQS sqsClient,
-        IOptions<CloudPrintOptions> options,
+        ResolvedLane lane,
+        int visibilityTimeoutSeconds,
         ILogger<SqsJobSource> logger)
     {
         _sqsClient = sqsClient;
-        _options = options.Value;
+        _lane = lane;
+        _visibilityTimeoutSeconds = visibilityTimeoutSeconds;
         _logger = logger;
     }
 
@@ -26,10 +28,10 @@ public class SqsJobSource : IJobSource
     {
         var request = new ReceiveMessageRequest
         {
-            QueueUrl = _options.QueueUrl,
+            QueueUrl = _lane.QueueUrl,
             MaxNumberOfMessages = 1,
             WaitTimeSeconds = 20,
-            VisibilityTimeout = _options.VisibilityTimeoutSeconds
+            VisibilityTimeout = _visibilityTimeoutSeconds
         };
 
         var response = await _sqsClient.ReceiveMessageAsync(request, cancellationToken);
@@ -39,13 +41,14 @@ public class SqsJobSource : IJobSource
             return null;
 
         var message = messages[0];
-        _logger.LogInformation("Received SQS message {MessageId}: {Body}", message.MessageId, message.Body);
+        _logger.LogInformation("[{Printer}] Received SQS message {MessageId}: {Body}",
+            _lane.PrinterName, message.MessageId, message.Body);
 
         var job = JsonSerializer.Deserialize<PrintJobMessage>(message.Body);
         if (job is null)
         {
-            _logger.LogError("Failed to deserialize SQS message {MessageId}. Body: {Body}",
-                message.MessageId, message.Body);
+            _logger.LogError("[{Printer}] Failed to deserialize SQS message {MessageId}. Body: {Body}",
+                _lane.PrinterName, message.MessageId, message.Body);
             return null;
         }
 
@@ -57,20 +60,25 @@ public class SqsJobSource : IJobSource
         };
     }
 
-    public Task AcknowledgeAsync(string jobId, bool success, string? error, CancellationToken cancellationToken)
+    public async Task AcknowledgeAsync(JobEnvelope envelope, bool success, string? error, CancellationToken cancellationToken)
     {
-        // SQS ack = delete message (handled by polling service via DeleteMessageAsync)
-        // SQS failure = do nothing — visibility timeout expires and message returns to queue automatically
-        if (!success)
+        if (success)
         {
-            _logger.LogDebug("Job {JobId} failed — message will return to queue after visibility timeout expires", jobId);
+            if (envelope.ReceiptHandle is null)
+            {
+                _logger.LogWarning("[{Printer}] Cannot delete SQS message {JobId}: no receipt handle",
+                    _lane.PrinterName, envelope.Id);
+                return;
+            }
+
+            await _sqsClient.DeleteMessageAsync(_lane.QueueUrl, envelope.ReceiptHandle, cancellationToken);
+            return;
         }
 
-        return Task.CompletedTask;
-    }
-
-    public async Task DeleteMessageAsync(string receiptHandle, CancellationToken cancellationToken)
-    {
-        await _sqsClient.DeleteMessageAsync(_options.QueueUrl, receiptHandle, cancellationToken);
+        // Failure: leave the message in the queue. Visibility timeout returns it eventually,
+        // and the redrive policy moves it to the DLQ after maxReceiveCount.
+        _logger.LogDebug(
+            "[{Printer}] Job {JobId} failed — message will return to queue after visibility timeout expires",
+            _lane.PrinterName, envelope.Id);
     }
 }

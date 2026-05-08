@@ -8,21 +8,26 @@ namespace CloudPrint.Service.Transport;
 
 public class JobProcessor : IJobProcessor
 {
+    private readonly ResolvedLane _lane;
     private readonly CloudPrintOptions _options;
     private readonly FileDownloader _fileDownloader;
     private readonly PrintRouter _printRouter;
     private readonly ILogger<JobProcessor> _logger;
+    private readonly PdfRenderSettings _pdfSettings;
 
     public JobProcessor(
+        ResolvedLane lane,
         IOptions<CloudPrintOptions> options,
         FileDownloader fileDownloader,
         PrintRouter printRouter,
         ILogger<JobProcessor> logger)
     {
+        _lane = lane;
         _options = options.Value;
         _fileDownloader = fileDownloader;
         _printRouter = printRouter;
         _logger = logger;
+        _pdfSettings = new PdfRenderSettings(lane.PdfRenderDpi, lane.PdfFitMode);
     }
 
     private static readonly HashSet<string> TextContentTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -34,9 +39,17 @@ public class JobProcessor : IJobProcessor
     public async Task<(bool Success, string? Error)> ProcessAsync(
         string jobId, PrintJobMessage job, CancellationToken cancellationToken)
     {
-        var printerName = !string.IsNullOrWhiteSpace(job.PrinterName)
-            ? job.PrinterName
-            : _options.PrinterName;
+        // Per-lane printer binding is the contract: queue → printer is fixed by config.
+        // A job-level printerName that disagrees with the lane is logged and ignored.
+        if (!string.IsNullOrWhiteSpace(job.PrinterName) &&
+            !string.Equals(job.PrinterName, _lane.PrinterName, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Job {JobId} requested printer '{RequestedPrinter}' but this queue is bound to '{LanePrinter}'. Using lane printer.",
+                jobId, job.PrinterName, _lane.PrinterName);
+        }
+
+        var printerName = _lane.PrinterName;
 
         bool hasContent = !string.IsNullOrEmpty(job.Content);
         bool hasFileUrl = !string.IsNullOrWhiteSpace(job.FileUrl);
@@ -77,7 +90,7 @@ public class JobProcessor : IJobProcessor
             var copies = Math.Clamp(job.Copies, 1, 100);
             for (var i = 0; i < copies; i++)
             {
-                _printRouter.Print(tempFile, printerName, job.ContentType);
+                _printRouter.Print(tempFile, printerName, job.ContentType, _pdfSettings);
             }
 
             _logger.LogInformation("Print job {JobId} completed successfully", jobId);
