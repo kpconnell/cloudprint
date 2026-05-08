@@ -15,19 +15,22 @@ irm https://github.com/kpconnell/cloudprint/releases/latest/download/install.ps1
 ```
 
 The installer will:
-1. Show available local printers and let you pick one
-2. Ask which transport to use (SQS or HTTP)
-3. Prompt for transport-specific configuration (AWS credentials or API URL + key)
-4. Install and start the Windows Service
+1. Ask which transport to use (SQS or HTTP)
+2. Prompt for transport-specific configuration (AWS credentials or API URL + key)
+3. **SQS**: walk you through configuring one or more printers (loop "Add another printer? [y/N]"). **HTTP**: prompt for a single printer.
+4. For each printer, optionally customize PDF render DPI / fit mode (defaults are fine for most printers)
+5. Install and start the Windows Service
 
-On reinstall, existing configuration is preserved — just press Enter to keep current values.
+On reinstall, existing configuration is shown and you can **K**eep all printers, **E**dit the list, or **W**ipe and start over. AWS credentials and other settings prompt with the existing value as the default — press Enter to keep.
+
+> **Note:** Reinstall on the SQS transport deletes all `cloudprint-{hostname}-*` queues for the machine and recreates them from the new printer list. AWS reserves queue names for ~60 seconds after deletion, so wait briefly if you re-run with the same names.
 
 ## How It Works
 
-1. CloudPrint long-polls for jobs (from SQS or your HTTP API, depending on transport)
+1. CloudPrint long-polls for jobs. **SQS**: one polling loop per configured printer, each bound to its own queue. **HTTP**: a single long-poll loop against your API.
 2. The print content is resolved — either downloaded from the `fileUrl` or read directly from the inline `content` field
 3. The file is validated (magic bytes check against claimed content type)
-4. The file is sent to the configured printer
+4. The file is sent to the printer the queue (or HTTP transport) is bound to
 5. On success, the job is acknowledged (deleted from SQS, or PATCH'd as completed via HTTP)
 6. On failure, the job is retried (SQS visibility timeout / HTTP server-side retry)
 
@@ -50,7 +53,7 @@ Jobs are JSON with the same shape regardless of transport:
 |---|---|---|
 | `fileUrl` | One of `fileUrl` or `content` required | HTTPS URL to the file (signed or public) |
 | `content` | One of `fileUrl` or `content` required | Inline print content (see below) |
-| `printerName` | No | Override the configured printer (optional) |
+| `printerName` | No | **HTTP transport only** — overrides the configured printer. **Ignored on SQS** (the queue → printer binding is the contract; a mismatch is logged as a warning). |
 | `contentType` | Yes | MIME type determining how the file is printed |
 | `copies` | No | Number of copies (default: 1) |
 | `metadata` | No | Arbitrary key-value pairs for your own tracking |
@@ -114,7 +117,9 @@ PDFs are rasterized to a bitmap, then sent through the Windows printing pipeline
 | `PdfRenderDpi` | `300` | Rasterization resolution. `203` for thermal label printers, `300` for office, `600` for high-fidelity reports. Higher DPI = more memory per page. |
 | `PdfFitMode` | `Margins` | `Margins` fits within the driver-reported page margins (office printers). `PhysicalPage` prints edge-to-edge ignoring margins (thermal/label printers). |
 
-The installer prompts for these under "PDF Print Settings". Defaults are kept on reinstall. To change them later without reinstalling, edit `appsettings.json` and restart the service.
+**Per-printer overrides (SQS):** Each entry in `Printers[]` may set its own `PdfRenderDpi` / `PdfFitMode`. When a lane omits a value, it falls back to the top-level default. This lets a thermal label printer (`203` / `PhysicalPage`) and an office laser (`300` / `Margins`) coexist on the same machine. The installer prompts per printer; the top-level values are the defaults you'll see in subsequent prompts.
+
+To change settings later without reinstalling, edit `appsettings.json` and restart the service.
 
 ## Transports
 
@@ -179,7 +184,7 @@ The hostname and printer name are lowercased with non-alphanumeric characters re
 - `cloudprint-warehouse-pc1-zebra-zp500`
 - `cloudprint-warehouse-pc1-zebra-zp500-dlq`
 
-Queue names are capped at 80 characters (SQS limit).
+Queue names are capped at 76 characters so the `-dlq` suffix on the dead-letter queue stays within SQS's 80-character limit. Each printer on a machine gets its own queue pair.
 
 #### IAM Setup
 

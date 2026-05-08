@@ -17,6 +17,8 @@ CloudPrint needs AWS credentials with access to SQS queues. These credentials sh
             "Effect": "Allow",
             "Action": [
                 "sqs:CreateQueue",
+                "sqs:DeleteQueue",
+                "sqs:TagQueue",
                 "sqs:SetQueueAttributes",
                 "sqs:GetQueueAttributes",
                 "sqs:GetQueueUrl",
@@ -24,6 +26,12 @@ CloudPrint needs AWS credentials with access to SQS queues. These credentials sh
                 "sqs:DeleteMessage"
             ],
             "Resource": "arn:aws:sqs:*:*:cloudprint-*"
+        },
+        {
+            "Sid": "CloudPrintQueueDiscovery",
+            "Effect": "Allow",
+            "Action": "sqs:ListQueues",
+            "Resource": "*"
         },
         {
             "Sid": "CloudPrintCredentialVerification",
@@ -41,13 +49,18 @@ CloudPrint needs AWS credentials with access to SQS queues. These credentials sh
 
 | Action | Purpose |
 |--------|---------|
-| `sqs:CreateQueue` | Installer auto-creates the main queue and dead-letter queue |
+| `sqs:CreateQueue` | Installer auto-creates main + dead-letter queues (one pair per printer) |
+| `sqs:DeleteQueue` | Reinstall wipes existing `cloudprint-{hostname}-*` queues before recreating |
+| `sqs:TagQueue` | Stamps each queue with `Application`/`Hostname`/`PrinterName` tags so cloud-side senders can discover available printers |
 | `sqs:SetQueueAttributes` | Sets the redrive policy (DLQ) on an existing queue |
 | `sqs:GetQueueAttributes` | Reads the DLQ ARN to configure the redrive policy |
 | `sqs:GetQueueUrl` | Looks up the queue URL when the queue already exists |
+| `sqs:ListQueues` | Finds existing `cloudprint-{hostname}-*` queues on reinstall (this action has no resource scoping in IAM) |
 | `sqs:ReceiveMessage` | Long-polls the queue for print jobs |
 | `sqs:DeleteMessage` | Removes a message after a job prints successfully |
 | `sts:GetCallerIdentity` | Validates credentials during installation |
+
+> **Discovery permission for senders:** Whatever **sends** print jobs typically also wants to discover what printers are available. That side needs `sqs:ListQueues` plus `sqs:ListQueueTags` on `cloudprint-*`. Those permissions are *not* in this policy — they belong to the publisher, not the CloudPrint service.
 
 ## 2. Create an IAM User
 
@@ -66,15 +79,15 @@ These two values are what you'll provide during CloudPrint installation. The ins
 ## What These Credentials Can Do
 
 With the policy above, the credentials can **only**:
-- Create and configure queues named `cloudprint-*`
-- Receive and delete messages from those queues
+- Create, tag, configure, and delete queues named `cloudprint-*`
+- List queues (filtered by prefix at call time, scoped in practice to `cloudprint-{hostname}-*`)
+- Receive and delete messages from `cloudprint-*` queues
 - Look up queue URLs and attributes
 - Verify their own identity (STS)
 
 They **cannot**:
 - Send messages to any queue
-- Delete queues
-- Access queues not named `cloudprint-*`
+- Touch any queue not named `cloudprint-*`
 - Access any other AWS service (S3, EC2, Lambda, etc.) beyond the read-only `sts:GetCallerIdentity` call used during install
 
 ## Sharing Credentials Across Machines
