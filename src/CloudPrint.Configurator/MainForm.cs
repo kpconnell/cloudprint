@@ -354,7 +354,7 @@ internal sealed class MainForm : Form
         return config;
     }
 
-    private string? Validate()
+    private string? ValidateInput()
     {
         if (_printers.Count == 0)
             return "Add at least one printer.";
@@ -395,7 +395,7 @@ internal sealed class MainForm : Form
 
     private async void OnApply(object? sender, EventArgs e)
     {
-        var error = Validate();
+        var error = ValidateInput();
         if (error is not null)
         {
             MessageBox.Show(this, error, "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
