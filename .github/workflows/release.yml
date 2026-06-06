@@ -22,35 +22,32 @@ jobs:
       - name: Test
         run: dotnet test --verbosity normal
 
+      # Build the one-file installer: publish the service, embed it into the configurator,
+      # then publish the configurator as a single self-contained exe.
       - name: Publish service
         run: |
           dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj `
-            -c Release `
-            -r win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o publish
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o out/service
 
-      - name: Publish configurator (GUI)
+      - name: Embed service into configurator
+        run: Copy-Item out/service/CloudPrint.Service.exe src/CloudPrint.Configurator/CloudPrint.Service.exe -Force
+
+      - name: Publish one-file installer
         run: |
           dotnet publish src/CloudPrint.Configurator/CloudPrint.Configurator.csproj `
-            -c Release `
-            -r win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o publish
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o out/app
 
-      - name: Package release
-        run: |
-          Copy-Item scripts/install.ps1 publish/
-          Compress-Archive -Path publish/* -DestinationPath cloudprint-win-x64.zip
+      - name: Stage installer
+        run: Copy-Item out/app/CloudPrint.Configurator.exe CloudPrint-Setup.exe -Force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            cloudprint-win-x64.zip
-            scripts/install.ps1
+            CloudPrint-Setup.exe
