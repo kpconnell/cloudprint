@@ -21,6 +21,10 @@ using Serilog.Sinks.File;
 if (args.Length > 0 && args[0].Equals("list-devices", StringComparison.OrdinalIgnoreCase))
     return ListDevices();
 
+// --- Live device reading preview (config on stdin, no credentials needed) ---
+if (args.Length > 0 && args[0].Equals("preview-device", StringComparison.OrdinalIgnoreCase))
+    return await PreviewDevice();
+
 // --- CLI commands for install script (input via stdin as JSON) ---
 if (args.Length > 0)
 {
@@ -309,6 +313,102 @@ static IReadingPublisher CreateReadingPublisher(ResolvedOutput output, IServiceP
         sp.GetRequiredService<ILogger<SqsReadingPublisher>>()),
     _ => throw new InvalidOperationException($"Unknown device output transport: {output.Transport}")
 };
+
+// Connects to a device using its config (from stdin) and streams live readings as JSON lines to
+// stdout for a bounded window, so the configurator can show "reading now: 12.34 lb". Bounded so it
+// always exits cleanly (disposing the port); the configurator may also kill it when its dialog closes.
+static async Task<int> PreviewDevice()
+{
+    var input = await Console.In.ReadToEndAsync();
+
+    DeviceConfig? config;
+    try
+    {
+        config = JsonSerializer.Deserialize<DeviceConfig>(input,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    }
+    catch (JsonException ex)
+    {
+        Console.Error.WriteLine("Invalid device JSON on stdin: " + ex.Message);
+        return 1;
+    }
+
+    if (config is null || string.IsNullOrWhiteSpace(config.Name))
+    {
+        Console.Error.WriteLine("Expected device config JSON on stdin with a \"Name\".");
+        return 1;
+    }
+
+    var resolved = new CloudPrintOptions { Devices = { config } }.ResolvedDevices().FirstOrDefault();
+    if (resolved is null)
+    {
+        Console.Error.WriteLine("Could not resolve device config.");
+        return 1;
+    }
+
+    var services = new ServiceCollection();
+    services.AddLogging(); // no provider added => silent, keeps stdout clean for readings
+    services.AddSingleton<IDeviceReaderFactory, SimulatedDeviceReaderFactory>();
+#if WINDOWS
+    services.AddSingleton<IDeviceReaderFactory, SerialScaleReaderFactory>();
+    services.AddSingleton<IDeviceReaderFactory, RawSerialReaderFactory>();
+    services.AddSingleton<IDeviceReaderFactory, HidScaleReaderFactory>();
+    services.AddSingleton<IDeviceReaderFactory, RawHidReaderFactory>();
+#endif
+    services.AddSingleton<DeviceReaderRegistry>();
+    await using var provider = services.BuildServiceProvider();
+
+    IDeviceReader reader;
+    try
+    {
+        reader = provider.GetRequiredService<DeviceReaderRegistry>().Create(resolved, provider);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+
+    await using (reader)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await reader.ConnectAsync(cts.Token);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
+        while (!cts.IsCancellationRequested)
+        {
+            DeviceReading? reading;
+            try
+            {
+                reading = await reader.ReadAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                break;
+            }
+
+            if (reading is not null)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(reading));
+                await Console.Out.FlushAsync();
+            }
+        }
+    }
+
+    return 0;
+}
 
 static int ListDevices()
 {

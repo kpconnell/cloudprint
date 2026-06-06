@@ -6,209 +6,204 @@ using CloudPrint.Configurator.Core.Exe;
 namespace CloudPrint.Configurator;
 
 /// <summary>
-/// Tabbed configurator: Transport, Printers, Devices, Apply. All non-UI logic lives in
-/// CloudPrint.Configurator.Core (config model, queue naming, exe client) which is unit-tested;
-/// this form is the thin Windows-only shell over it.
+/// Single "Station Setup" hub: connection + Test at top, then a Printers list and a Devices list you grow
+/// with Add (each Add is the loop), then one Install &amp; Start action with live status. All non-UI logic
+/// lives in the tested CloudPrint.Configurator.Core; this is the thin Windows-only shell.
 /// </summary>
 internal sealed class MainForm : Form
 {
-    // Resolved by InstallContext at startup: %ProgramFiles%\CloudPrint for packaged builds,
-    // or next to this exe for dev builds.
     private static string ServiceExePath => InstallContext.ServiceExePath;
-
     private static string ConfigPath => InstallContext.ConfigPath;
 
-    private readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
-
-    // Transport tab
-    private readonly RadioButton _rbSqs = new() { Text = "SQS (multiple printers)", Left = 16, Top = 16, Width = 200 };
-    private readonly RadioButton _rbHttp = new() { Text = "HTTP API (single printer)", Left = 230, Top = 16, Width = 220 };
+    // Connection
+    private readonly RadioButton _rbSqs = new() { Text = "Amazon SQS (use the keys you were given)", AutoSize = true };
+    private readonly RadioButton _rbHttp = new() { Text = "Our own server (HTTP API)", AutoSize = true };
     private readonly ComboBox _region = new();
     private readonly TextBox _accessKey = new();
     private readonly TextBox _secretKey = new() { UseSystemPasswordChar = true };
-    private readonly Label _credResult = new() { Left = 16, Top = 250, Width = 600, ForeColor = Color.DarkGreen };
-    private readonly Panel _httpApiPanel = new() { Left = 16, Top = 290, Width = 620, Height = 180 };
+    private readonly Label _credResult = new() { AutoSize = true, ForeColor = Color.DimGray };
+    private readonly Panel _httpPanel = new();
     private readonly TextBox _apiUrl = new();
     private readonly TextBox _ackUrl = new();
     private readonly TextBox _apiHeaderName = new();
     private readonly TextBox _apiHeaderValue = new() { UseSystemPasswordChar = true };
 
-    // Printers tab
-    private readonly ListBox _printerList = new() { Left = 16, Top = 16, Width = 600, Height = 360 };
+    // Printers
+    private readonly ListBox _printerList = new();
     private List<PrinterLaneModel> _printers = new();
 
-    // Devices tab
+    // Devices
     private readonly TextBox _station = new();
-    private readonly NumericUpDown _devicePollInterval = new();
-    private readonly CheckBox _deviceStableOnly = new() { Text = "Only publish stable readings (default)" };
-    private readonly ListBox _deviceList = new() { Left = 16, Top = 110, Width = 600, Height = 280 };
+    private readonly ListBox _deviceList = new();
     private List<DeviceModel> _devices = new();
 
-    // Apply tab
-    private readonly CheckBox _dump = new() { Text = "Enable debug payload dumping (C:\\ProgramData\\CloudPrint\\dumps)" };
-    private readonly TextBox _summary = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+    // Install
+    private readonly CheckBox _dump = new() { Text = "Save debug copies of each job (C:\\ProgramData\\CloudPrint\\dumps)", AutoSize = true };
+    private readonly Button _install = new() { Text = "Install && Start", Width = 180, Height = 36 };
+    private readonly Label _status = new() { AutoSize = true, ForeColor = Color.DimGray };
     private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
-    private readonly Button _apply = new() { Text = "Apply — install && start service" };
 
     public MainForm()
     {
-        Text = "CloudPrint Configurator";
+        Text = "CloudPrint — Station Setup";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(680, 560);
-        MinimumSize = new Size(700, 600);
+        ClientSize = new Size(720, 780);
+        MinimumSize = new Size(740, 700);
+        AutoScroll = true;
 
-        BuildTransportTab();
-        BuildPrintersTab();
-        BuildDevicesTab();
-        BuildApplyTab();
-        Controls.Add(_tabs);
+        var y = 12;
+        BuildConnection(ref y);
+        BuildPrinters(ref y);
+        BuildDevices(ref y);
+        BuildInstall(ref y);
 
         _rbSqs.CheckedChanged += (_, _) => ApplyTransportVisibility();
         _rbHttp.CheckedChanged += (_, _) => ApplyTransportVisibility();
-        _tabs.SelectedIndexChanged += (_, _) => UpdateSummary();
 
         LoadExisting();
     }
 
-    // ---- Tab construction ----
+    // ---- Layout ----
 
-    private void BuildTransportTab()
+    private void BuildConnection(ref int y)
     {
-        var tab = new TabPage("Transport");
-        tab.Controls.Add(_rbSqs);
-        tab.Controls.Add(_rbHttp);
+        var group = new GroupBox { Text = "Connection", Left = 12, Top = y, Width = 690, Height = 320 };
 
-        var aws = new GroupBox { Text = "AWS (SQS printing and/or SQS device output)", Left = 16, Top = 48, Width = 620, Height = 190 };
-        aws.Controls.Add(new Label { Text = "Region", Left = 16, Top = 30, Width = 90 });
-        _region.SetBounds(120, 26, 320, 24);
+        _rbSqs.Location = new Point(16, 26);
+        _rbHttp.Location = new Point(360, 26);
+        group.Controls.Add(_rbSqs);
+        group.Controls.Add(_rbHttp);
+
+        group.Controls.Add(new Label { Text = "AWS keys (for SQS printing and SQS devices):", Left = 16, Top = 56, AutoSize = true, ForeColor = Color.DimGray });
+
+        group.Controls.Add(new Label { Text = "Region", Left = 16, Top = 88, Width = 110 });
+        _region.SetBounds(130, 84, 320, 24);
         _region.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var r in AwsRegions.All)
             _region.Items.Add($"{r.Id} — {r.Name}");
-        aws.Controls.Add(_region);
+        group.Controls.Add(_region);
 
-        aws.Controls.Add(new Label { Text = "Access Key ID", Left = 16, Top = 66, Width = 90 });
-        _accessKey.SetBounds(120, 62, 320, 24);
-        aws.Controls.Add(_accessKey);
+        group.Controls.Add(new Label { Text = "Access Key ID", Left = 16, Top = 120, Width = 110 });
+        _accessKey.SetBounds(130, 116, 320, 24);
+        group.Controls.Add(_accessKey);
 
-        aws.Controls.Add(new Label { Text = "Secret Access Key", Left = 16, Top = 102, Width = 100 });
-        _secretKey.SetBounds(120, 98, 320, 24);
-        aws.Controls.Add(_secretKey);
+        group.Controls.Add(new Label { Text = "Secret Access Key", Left = 16, Top = 152, Width = 110 });
+        _secretKey.SetBounds(130, 148, 320, 24);
+        group.Controls.Add(_secretKey);
 
-        var test = new Button { Text = "Test credentials", Left = 120, Top = 132, Width = 150 };
+        var test = new Button { Text = "Test", Left = 470, Top = 147, Width = 90 };
         test.Click += OnTestCredentials;
-        aws.Controls.Add(test);
-        tab.Controls.Add(aws);
+        group.Controls.Add(test);
+        _credResult.Location = new Point(130, 182);
+        group.Controls.Add(_credResult);
 
-        tab.Controls.Add(_credResult);
+        // HTTP fields (shown only for the HTTP transport)
+        _httpPanel.SetBounds(12, 206, 666, 104);
+        _httpPanel.Controls.Add(new Label { Text = "API URL", Left = 4, Top = 4, Width = 110 });
+        _apiUrl.SetBounds(130, 0, 520, 24);
+        _httpPanel.Controls.Add(_apiUrl);
+        _httpPanel.Controls.Add(new Label { Text = "Ack URL", Left = 4, Top = 32, Width = 110 });
+        _ackUrl.SetBounds(130, 28, 520, 24);
+        _httpPanel.Controls.Add(_ackUrl);
+        _httpPanel.Controls.Add(new Label { Text = "Header name", Left = 4, Top = 60, Width = 110 });
+        _apiHeaderName.SetBounds(130, 56, 200, 24);
+        _httpPanel.Controls.Add(_apiHeaderName);
+        _httpPanel.Controls.Add(new Label { Text = "Header value", Left = 4, Top = 88, Width = 110 });
+        _apiHeaderValue.SetBounds(130, 84, 520, 24);
+        _httpPanel.Controls.Add(_apiHeaderValue);
+        group.Controls.Add(_httpPanel);
 
-        _httpApiPanel.Controls.Add(new Label { Text = "HTTP API (fetch + acknowledge print jobs)", Left = 0, Top = 0, Width = 400, Font = new Font(Font, FontStyle.Bold) });
-        _httpApiPanel.Controls.Add(new Label { Text = "API URL", Left = 0, Top = 30, Width = 90 });
-        _apiUrl.SetBounds(110, 26, 500, 24);
-        _httpApiPanel.Controls.Add(_apiUrl);
-        _httpApiPanel.Controls.Add(new Label { Text = "Ack URL", Left = 0, Top = 62, Width = 90 });
-        _ackUrl.SetBounds(110, 58, 500, 24);
-        _httpApiPanel.Controls.Add(_ackUrl);
-        _httpApiPanel.Controls.Add(new Label { Text = "Header name", Left = 0, Top = 94, Width = 90 });
-        _apiHeaderName.SetBounds(110, 90, 200, 24);
-        _httpApiPanel.Controls.Add(_apiHeaderName);
-        _httpApiPanel.Controls.Add(new Label { Text = "Header value", Left = 0, Top = 126, Width = 90 });
-        _apiHeaderValue.SetBounds(110, 122, 500, 24);
-        _httpApiPanel.Controls.Add(_apiHeaderValue);
-        tab.Controls.Add(_httpApiPanel);
-
-        _tabs.TabPages.Add(tab);
+        Controls.Add(group);
+        y += group.Height + 10;
     }
 
-    private void BuildPrintersTab()
+    private void BuildPrinters(ref int y)
     {
-        var tab = new TabPage("Printers");
-        tab.Controls.Add(_printerList);
+        var group = new GroupBox { Text = "Printers", Left = 12, Top = y, Width = 690, Height = 150 };
 
-        var add = new Button { Text = "Add", Left = 630, Top = 16, Width = 90 };
-        var edit = new Button { Text = "Edit", Left = 630, Top = 52, Width = 90 };
-        var remove = new Button { Text = "Remove", Left = 630, Top = 88, Width = 90 };
-        add.Click += (_, _) => AddOrEditPrinter(null);
-        edit.Click += (_, _) => { if (_printerList.SelectedIndex >= 0) AddOrEditPrinter(_printerList.SelectedIndex); };
-        remove.Click += (_, _) => RemovePrinter();
-        tab.Controls.Add(add);
-        tab.Controls.Add(edit);
-        tab.Controls.Add(remove);
+        _printerList.SetBounds(16, 26, 540, 108);
+        group.Controls.Add(_printerList);
 
-        _tabs.TabPages.Add(tab);
+        AddListButtons(group, 568, () => AddOrEditPrinter(null),
+            () => { if (_printerList.SelectedIndex >= 0) AddOrEditPrinter(_printerList.SelectedIndex); },
+            RemovePrinter, "+ Add printer");
+
+        Controls.Add(group);
+        y += group.Height + 10;
     }
 
-    private void BuildDevicesTab()
+    private void BuildDevices(ref int y)
     {
-        var tab = new TabPage("Devices");
-        tab.Controls.Add(new Label { Text = "Station (blank = machine name)", Left = 16, Top = 18, Width = 200 });
-        _station.SetBounds(230, 14, 200, 24);
-        tab.Controls.Add(_station);
+        var group = new GroupBox { Text = "Scales & devices (optional)", Left = 12, Top = y, Width = 690, Height = 184 };
 
-        tab.Controls.Add(new Label { Text = "Default poll interval (ms)", Left = 16, Top = 50, Width = 200 });
-        _devicePollInterval.SetBounds(230, 46, 100, 24);
-        _devicePollInterval.Minimum = 0;
-        _devicePollInterval.Maximum = 600000;
-        _devicePollInterval.Value = ConfigDefaults.DefaultDevicePollIntervalMs;
-        tab.Controls.Add(_devicePollInterval);
+        group.Controls.Add(new Label { Text = "Station name", Left = 16, Top = 28, Width = 90 });
+        _station.SetBounds(110, 24, 220, 24);
+        group.Controls.Add(_station);
+        group.Controls.Add(new Label { Text = "(optional — defaults to this PC's name)", Left = 340, Top = 28, AutoSize = true, ForeColor = Color.DimGray });
 
-        _deviceStableOnly.SetBounds(16, 80, 400, 24);
-        _deviceStableOnly.Checked = ConfigDefaults.DefaultDeviceStableOnly;
-        tab.Controls.Add(_deviceStableOnly);
+        _deviceList.SetBounds(16, 60, 540, 108);
+        group.Controls.Add(_deviceList);
 
-        tab.Controls.Add(_deviceList);
+        AddListButtons(group, 568, () => AddOrEditDevice(null),
+            () => { if (_deviceList.SelectedIndex >= 0) AddOrEditDevice(_deviceList.SelectedIndex); },
+            RemoveDevice, "+ Add device", topOffset: 34);
 
-        var add = new Button { Text = "Add", Left = 630, Top = 110, Width = 90 };
-        var edit = new Button { Text = "Edit", Left = 630, Top = 146, Width = 90 };
-        var remove = new Button { Text = "Remove", Left = 630, Top = 182, Width = 90 };
-        add.Click += (_, _) => AddOrEditDevice(null);
-        edit.Click += (_, _) => { if (_deviceList.SelectedIndex >= 0) AddOrEditDevice(_deviceList.SelectedIndex); };
-        remove.Click += (_, _) => RemoveDevice();
-        tab.Controls.Add(add);
-        tab.Controls.Add(edit);
-        tab.Controls.Add(remove);
-
-        _tabs.TabPages.Add(tab);
+        Controls.Add(group);
+        y += group.Height + 10;
     }
 
-    private void BuildApplyTab()
+    private void BuildInstall(ref int y)
     {
-        var tab = new TabPage("Apply");
-        _dump.SetBounds(16, 16, 560, 24);
-        tab.Controls.Add(_dump);
+        _dump.Location = new Point(16, y);
+        Controls.Add(_dump);
+        y += 30;
 
-        tab.Controls.Add(new Label { Text = "Summary", Left = 16, Top = 48, Width = 200 });
-        _summary.SetBounds(16, 72, 700, 150);
-        tab.Controls.Add(_summary);
+        _install.Location = new Point(16, y);
+        _install.Click += OnInstall;
+        Controls.Add(_install);
 
-        _apply.SetBounds(16, 232, 260, 32);
-        _apply.Click += OnApply;
-        tab.Controls.Add(_apply);
+        _status.Location = new Point(210, y + 10);
+        Controls.Add(_status);
+        y += 46;
 
-        tab.Controls.Add(new Label { Text = "Log", Left = 16, Top = 272, Width = 200 });
-        _log.SetBounds(16, 296, 700, 180);
-        tab.Controls.Add(_log);
-
-        _tabs.TabPages.Add(tab);
+        _log.SetBounds(16, y, 686, 120);
+        Controls.Add(_log);
+        y += 130;
     }
 
-    // ---- Transport ----
+    private static void AddListButtons(
+        Control parent, int left, Action add, Action edit, Action remove, string addText, int topOffset = 26)
+    {
+        var addBtn = new Button { Text = addText, Left = left, Top = topOffset, Width = 110 };
+        var editBtn = new Button { Text = "Edit", Left = left, Top = topOffset + 36, Width = 110 };
+        var removeBtn = new Button { Text = "Remove", Left = left, Top = topOffset + 72, Width = 110 };
+        addBtn.Click += (_, _) => add();
+        editBtn.Click += (_, _) => edit();
+        removeBtn.Click += (_, _) => remove();
+        parent.Controls.Add(addBtn);
+        parent.Controls.Add(editBtn);
+        parent.Controls.Add(removeBtn);
+    }
 
-    private void ApplyTransportVisibility() => _httpApiPanel.Visible = _rbHttp.Checked;
+    private void ApplyTransportVisibility() => _httpPanel.Visible = _rbHttp.Checked;
+
+    // ---- Connection ----
 
     private async void OnTestCredentials(object? sender, EventArgs e)
     {
         try
         {
-            _credResult.ForeColor = Color.DarkGreen;
-            _credResult.Text = "Verifying...";
+            _credResult.ForeColor = Color.DimGray;
+            _credResult.Text = "Verifying…";
             var client = new ServiceExeClient(new ProcessRunner(), ServiceExePath);
             var arn = await client.VerifyCredentialsAsync(ReadCredentials());
-            _credResult.Text = "Authenticated as: " + arn;
+            _credResult.ForeColor = Color.Green;
+            _credResult.Text = "✓ " + arn;
         }
         catch (Exception ex)
         {
-            _credResult.ForeColor = Color.DarkRed;
-            _credResult.Text = "Failed: " + ex.Message;
+            _credResult.ForeColor = Color.Firebrick;
+            _credResult.Text = "✗ " + ex.Message;
         }
     }
 
@@ -274,7 +269,7 @@ internal sealed class MainForm : Form
     {
         _printerList.Items.Clear();
         foreach (var l in _printers)
-            _printerList.Items.Add($"{l.PrinterName}  ({l.PdfRenderDpi ?? ConfigDefaults.DefaultPdfRenderDpi} DPI, {l.PdfFitMode ?? ConfigDefaults.DefaultPdfFitMode})");
+            _printerList.Items.Add($"{l.PrinterName}   ({l.PdfRenderDpi ?? ConfigDefaults.DefaultPdfRenderDpi} DPI, {l.PdfFitMode ?? ConfigDefaults.DefaultPdfFitMode})");
     }
 
     // ---- Devices ----
@@ -305,10 +300,10 @@ internal sealed class MainForm : Form
     {
         _deviceList.Items.Clear();
         foreach (var d in _devices)
-            _deviceList.Items.Add($"{d.Name}  [{d.Type}] -> {d.Output?.Transport ?? ConfigDefaults.TransportSqs}");
+            _deviceList.Items.Add($"{d.Name}   [{d.Type}] → {d.Output?.Transport ?? ConfigDefaults.TransportSqs}");
     }
 
-    // ---- Build config from UI ----
+    // ---- Config assembly ----
 
     private bool DevicesNeedAws() => _devices.Any(d => d.Output?.Transport == ConfigDefaults.TransportSqs);
 
@@ -324,8 +319,8 @@ internal sealed class MainForm : Form
             DumpPayloads = _dump.Checked,
             DumpPath = InstallPaths.DumpPathWindows,
             Station = string.IsNullOrWhiteSpace(_station.Text) ? null : _station.Text.Trim(),
-            DevicePollIntervalMs = (int)_devicePollInterval.Value,
-            DeviceStableOnly = _deviceStableOnly.Checked,
+            DevicePollIntervalMs = ConfigDefaults.DefaultDevicePollIntervalMs,
+            DeviceStableOnly = ConfigDefaults.DefaultDeviceStableOnly,
             Devices = _devices,
         };
 
@@ -359,46 +354,24 @@ internal sealed class MainForm : Form
         if (_printers.Count == 0)
             return "Add at least one printer.";
 
-        if (NeedsAws())
-        {
-            if (string.IsNullOrWhiteSpace(_accessKey.Text) || string.IsNullOrWhiteSpace(_secretKey.Text))
-                return "AWS Access Key ID and Secret Access Key are required (SQS printing or SQS device output is configured).";
-        }
+        if (NeedsAws() && (string.IsNullOrWhiteSpace(_accessKey.Text) || string.IsNullOrWhiteSpace(_secretKey.Text)))
+            return "Enter your AWS Access Key ID and Secret Access Key (needed for SQS printing or SQS devices).";
 
-        if (_rbHttp.Checked)
-        {
-            if (string.IsNullOrWhiteSpace(_apiUrl.Text) || string.IsNullOrWhiteSpace(_ackUrl.Text) || string.IsNullOrWhiteSpace(_apiHeaderValue.Text))
-                return "HTTP transport requires API URL, Ack URL, and header value.";
-        }
+        if (_rbHttp.Checked &&
+            (string.IsNullOrWhiteSpace(_apiUrl.Text) || string.IsNullOrWhiteSpace(_ackUrl.Text) || string.IsNullOrWhiteSpace(_apiHeaderValue.Text)))
+            return "For 'Our own server', enter the API URL, Ack URL, and header value.";
 
         return null;
     }
 
-    private void UpdateSummary()
-    {
-        if (_tabs.SelectedTab?.Text != "Apply")
-            return;
+    // ---- Install ----
 
-        var transport = _rbHttp.Checked ? "HTTP API" : "SQS";
-        var lines = new List<string>
-        {
-            $"Transport:  {transport}",
-            $"Printers:   {_printers.Count}",
-            $"Devices:    {_devices.Count}",
-            $"AWS needed: {(NeedsAws() ? "yes" : "no")}",
-            $"Install to: {AppContext.BaseDirectory}",
-        };
-        _summary.Text = string.Join(Environment.NewLine, lines);
-    }
-
-    // ---- Apply ----
-
-    private async void OnApply(object? sender, EventArgs e)
+    private async void OnInstall(object? sender, EventArgs e)
     {
         var error = ValidateInput();
         if (error is not null)
         {
-            MessageBox.Show(this, error, "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, error, "Almost there", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -406,15 +379,15 @@ internal sealed class MainForm : Form
         {
             SetBusy(true);
             _log.Clear();
+            SetStatus("Installing…", Color.DimGray);
             var config = BuildConfigFromUi();
 
             if (NeedsAws())
             {
-                var creds = ReadCredentials();
                 var client = new ServiceExeClient(new ProcessRunner(), ServiceExePath);
-                Log("Verifying AWS credentials...");
-                Log("Authenticated as " + await client.VerifyCredentialsAsync(creds));
-                await ProvisionQueuesAsync(client, creds, config);
+                Log("Verifying AWS credentials…");
+                Log("Authenticated as " + await client.VerifyCredentialsAsync(ReadCredentials()));
+                await ProvisionQueuesAsync(client, ReadCredentials(), config);
             }
 
             await Task.Run(() =>
@@ -424,13 +397,15 @@ internal sealed class MainForm : Form
                 WindowsInstaller.RegisterAndStartService(ServiceExePath, Log);
             });
 
-            Log("Done — CloudPrint is installed and running.");
-            MessageBox.Show(this, "CloudPrint installed and started.", "Success",
+            Log("Done.");
+            SetStatus("● CloudPrint is running", Color.Green);
+            MessageBox.Show(this, "CloudPrint is installed and running.", "Success",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
             Log("ERROR: " + ex.Message);
+            SetStatus("● Install failed", Color.Firebrick);
             MessageBox.Show(this, ex.Message, "Install failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -448,14 +423,13 @@ internal sealed class MainForm : Form
             foreach (var lane in config.Printers)
             {
                 var queueName = QueueNaming.ForPrinter(host, lane.PrinterName);
-                var tags = new Dictionary<string, string>
+                Log($"Creating printer queue {queueName}…");
+                lane.QueueUrl = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
                 {
                     ["Application"] = "cloudprint",
                     ["Hostname"] = host,
                     ["PrinterName"] = lane.PrinterName,
-                };
-                Log($"Creating printer queue {queueName}...");
-                lane.QueueUrl = await client.CreateQueueAsync(creds, queueName, tags);
+                });
                 Log("  " + lane.QueueUrl);
             }
         }
@@ -464,23 +438,27 @@ internal sealed class MainForm : Form
         foreach (var device in config.Devices.Where(d => d.Output?.Transport == ConfigDefaults.TransportSqs))
         {
             var queueName = QueueNaming.ForDevice(station, device.Name);
-            var tags = new Dictionary<string, string>
+            Log($"Creating device queue {queueName}…");
+            device.Output!.QueueUrl = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
             {
                 ["Application"] = "cloudprint",
                 ["Station"] = station,
                 ["Device"] = device.Name,
-            };
-            Log($"Creating device queue {queueName}...");
-            device.Output!.QueueUrl = await client.CreateQueueAsync(creds, queueName, tags);
+            });
             Log("  " + device.Output.QueueUrl);
         }
     }
 
     private void SetBusy(bool busy)
     {
-        _apply.Enabled = !busy;
-        _tabs.Enabled = !busy;
+        _install.Enabled = !busy;
         UseWaitCursor = busy;
+    }
+
+    private void SetStatus(string text, Color color)
+    {
+        _status.ForeColor = color;
+        _status.Text = text;
     }
 
     private void Log(string message)
@@ -519,10 +497,6 @@ internal sealed class MainForm : Form
         _apiHeaderValue.Text = existing.ApiHeaderValue ?? string.Empty;
 
         _station.Text = existing.Station ?? string.Empty;
-        _devicePollInterval.Value = existing.DevicePollIntervalMs is >= 0 and <= 600000
-            ? existing.DevicePollIntervalMs.Value
-            : ConfigDefaults.DefaultDevicePollIntervalMs;
-        _deviceStableOnly.Checked = existing.DeviceStableOnly ?? ConfigDefaults.DefaultDeviceStableOnly;
         _dump.Checked = existing.DumpPayloads;
 
         _printers = existing.Printers.Count > 0
