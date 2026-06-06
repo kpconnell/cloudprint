@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>CloudPrint.Configurator</RootNamespace>
+    <AssemblyName>CloudPrint.Configurator</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Excluded from CloudPrint.sln on purpose: net8.0-windows can't build on the ubuntu CI / macOS dev
+         box. The windows-latest CI job builds this project explicitly. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CloudPrint.Configurator.Core\CloudPrint.Configurator.Core.csproj" />
+  </ItemGroup>
+
+</Project>

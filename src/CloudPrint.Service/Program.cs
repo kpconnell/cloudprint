@@ -5,13 +5,21 @@ using Amazon.SecurityToken.Model;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using CloudPrint.Service.Configuration;
+using CloudPrint.Service.Devices;
+using CloudPrint.Service.Devices.Readers;
 using CloudPrint.Service.FileHandling;
 using CloudPrint.Service.Printing;
+using CloudPrint.Service.Publishing;
 using CloudPrint.Service.Transport;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Serilog;
 using Serilog.Settings.Configuration;
 using Serilog.Sinks.File;
+
+// --- Device enumeration helper (no credentials needed) ---
+if (args.Length > 0 && args[0].Equals("list-devices", StringComparison.OrdinalIgnoreCase))
+    return ListDevices();
 
 // --- CLI commands for install script (input via stdin as JSON) ---
 if (args.Length > 0)
@@ -130,6 +138,9 @@ try
             throw new InvalidOperationException($"Unknown transport: {transport}. Use 'sqs' or 'http'.");
     }
 
+    // Device telemetry runs independently of the print transport — whenever Devices[] is configured.
+    RegisterDeviceForwarding(builder, cloudPrintOptions, dryRun);
+
     var host = builder.Build();
     host.Run();
     return 0;
@@ -227,6 +238,97 @@ static void RegisterHttpTransport(HostApplicationBuilder builder, CloudPrintOpti
         sp.GetRequiredService<IJobProcessor>(),
         $"http/{httpLane.PrinterName}",
         sp.GetRequiredService<ILogger<PrintJobPollingService>>()));
+}
+
+static void RegisterDeviceForwarding(HostApplicationBuilder builder, CloudPrintOptions options, bool dryRun)
+{
+    var devices = options.ResolvedDevices();
+    if (devices.Count == 0)
+        return;
+
+    Log.Information("CloudPrint configured for {Count} device(s): {Devices}",
+        devices.Count, string.Join(", ", devices.Select(d => $"{d.Type}/{d.Name}")));
+
+    // The simulated reader is always available (non-Windows / dry-run); real readers are Windows-only.
+    builder.Services.AddSingleton<IDeviceReaderFactory, SimulatedDeviceReaderFactory>();
+#if WINDOWS
+    if (!dryRun)
+    {
+        builder.Services.AddSingleton<IDeviceReaderFactory, SerialScaleReaderFactory>();
+        builder.Services.AddSingleton<IDeviceReaderFactory, RawSerialReaderFactory>();
+        builder.Services.AddSingleton<IDeviceReaderFactory, HidScaleReaderFactory>();
+        builder.Services.AddSingleton<IDeviceReaderFactory, RawHidReaderFactory>();
+    }
+#endif
+    builder.Services.AddSingleton<DeviceReaderRegistry>();
+    builder.Services.AddHttpClient();
+
+    // A device may publish to SQS even when the print transport is HTTP, so ensure the SQS client
+    // is registered. Idempotent — RegisterSqsLanes may already have added it.
+    if (devices.Any(d => d.Output.Transport == "sqs"))
+    {
+        builder.Services.TryAddSingleton<IAmazonSQS>(_ => new AmazonSQSClient(
+            options.AwsAccessKeyId,
+            options.AwsSecretAccessKey,
+            RegionEndpoint.GetBySystemName(options.Region)));
+    }
+
+    foreach (var device in devices)
+    {
+        var captured = device;
+        builder.Services.AddSingleton<IHostedService>(sp =>
+        {
+            var registry = sp.GetRequiredService<DeviceReaderRegistry>();
+            var effective = dryRun ? captured with { Type = "simulated" } : captured;
+            var reader = registry.Create(effective, sp);
+
+            IReadingPublisher publisher = dryRun
+                ? new DryRunReadingPublisher(sp.GetRequiredService<ILogger<DryRunReadingPublisher>>())
+                : CreateReadingPublisher(captured.Output, sp);
+
+            return new DeviceForwardingService(
+                reader,
+                publisher,
+                captured.Station,
+                captured.StableOnly,
+                $"device/{captured.Name}",
+                sp.GetRequiredService<ILogger<DeviceForwardingService>>());
+        });
+    }
+}
+
+static IReadingPublisher CreateReadingPublisher(ResolvedOutput output, IServiceProvider sp) => output.Transport switch
+{
+    "http" => new HttpReadingPublisher(
+        sp.GetRequiredService<IHttpClientFactory>().CreateClient("device-readings"),
+        output,
+        sp.GetRequiredService<ILogger<HttpReadingPublisher>>()),
+    "sqs" => new SqsReadingPublisher(
+        sp.GetRequiredService<IAmazonSQS>(),
+        output.QueueUrl ?? string.Empty,
+        sp.GetRequiredService<ILogger<SqsReadingPublisher>>()),
+    _ => throw new InvalidOperationException($"Unknown device output transport: {output.Transport}")
+};
+
+static int ListDevices()
+{
+#if WINDOWS
+    Console.WriteLine("Serial ports:");
+    foreach (var name in System.IO.Ports.SerialPort.GetPortNames().OrderBy(n => n))
+        Console.WriteLine($"  {name}");
+
+    Console.WriteLine("HID devices:");
+    foreach (var hid in HidSharp.DeviceList.Local.GetHidDevices())
+    {
+        string product;
+        try { product = hid.GetProductName(); } catch { product = "unknown"; }
+        Console.WriteLine($"  VID={hid.VendorID:X4} PID={hid.ProductID:X4} {product}");
+    }
+    return 0;
+#else
+    Console.Error.WriteLine("list-devices is only supported on Windows.");
+    return 1;
+#endif
 }
 
 // --- CLI helper methods ---

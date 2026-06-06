@@ -25,3 +25,47 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --verbosity normal
+
+  # The WinForms configurator targets net8.0-windows and cannot build on ubuntu/macOS, so it is kept
+  # out of CloudPrint.sln and compiled here. This job is the only place its UI shell is verified.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build configurator (WinForms)
+        run: dotnet build src/CloudPrint.Configurator/CloudPrint.Configurator.csproj -c Release /warnaserror
+
+      - name: Test
+        run: dotnet test --verbosity normal
+
+      # Publish a runnable package (service + configurator, both self-contained single-file, co-located
+      # so the configurator finds CloudPrint.Service.exe next to it) and upload it for manual testing.
+      - name: Publish service
+        run: >
+          dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o package
+
+      - name: Publish configurator
+        run: >
+          dotnet publish src/CloudPrint.Configurator/CloudPrint.Configurator.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o package
+
+      - name: Stage samples
+        run: Copy-Item samples package/samples -Recurse -Force
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudprint-configurator-win-x64
+          path: package
+          retention-days: 7
