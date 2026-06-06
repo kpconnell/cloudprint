@@ -43,3 +43,29 @@ jobs:
 
       - name: Test
         run: dotnet test --verbosity normal
+
+      # Publish a runnable package (service + configurator, both self-contained single-file, co-located
+      # so the configurator finds CloudPrint.Service.exe next to it) and upload it for manual testing.
+      - name: Publish service
+        run: >
+          dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o package
+
+      - name: Publish configurator
+        run: >
+          dotnet publish src/CloudPrint.Configurator/CloudPrint.Configurator.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o package
+
+      - name: Stage samples
+        run: Copy-Item samples package/samples -Recurse -Force
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudprint-configurator-win-x64
+          path: package
+          retention-days: 7
