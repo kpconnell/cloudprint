@@ -124,7 +124,7 @@ internal sealed class MainForm : Form
         _printerList.SetBounds(16, 26, 540, 140);
         group.Controls.Add(_printerList);
 
-        AddListButtons(group, 568, "+ Add printer",
+        AddListButtons(group, 568, _printerList, "+ Add printer",
             () => AddOrEditPrinter(null),
             OnTestPrinter,
             () => { if (_printerList.SelectedIndex >= 0) AddOrEditPrinter(_printerList.SelectedIndex); },
@@ -146,7 +146,7 @@ internal sealed class MainForm : Form
         _deviceList.SetBounds(16, 60, 540, 140);
         group.Controls.Add(_deviceList);
 
-        AddListButtons(group, 568, "+ Add device",
+        AddListButtons(group, 568, _deviceList, "+ Add device",
             () => AddOrEditDevice(null),
             OnTestDevice,
             () => { if (_deviceList.SelectedIndex >= 0) AddOrEditDevice(_deviceList.SelectedIndex); },
@@ -176,16 +176,24 @@ internal sealed class MainForm : Form
     }
 
     private static void AddListButtons(
-        Control parent, int left, string addText, Action add, Action test, Action edit, Action remove, int topOffset = 26)
+        Control parent, int left, ListBox list, string addText,
+        Action add, Action test, Action edit, Action remove, int topOffset = 26)
     {
         var addBtn = new Button { Text = addText, Left = left, Top = topOffset, Width = 110 };
         var testBtn = new Button { Text = "Test", Left = left, Top = topOffset + 36, Width = 110 };
         var editBtn = new Button { Text = "Edit", Left = left, Top = topOffset + 72, Width = 110 };
         var removeBtn = new Button { Text = "Remove", Left = left, Top = topOffset + 108, Width = 110 };
+
         addBtn.Click += (_, _) => add();
         testBtn.Click += (_, _) => test();
         editBtn.Click += (_, _) => edit();
         removeBtn.Click += (_, _) => remove();
+
+        // Test/Edit/Remove act on the selected row — disable them until something is selected.
+        void Sync() => testBtn.Enabled = editBtn.Enabled = removeBtn.Enabled = list.SelectedIndex >= 0;
+        list.SelectedIndexChanged += (_, _) => Sync();
+        Sync();
+
         parent.Controls.Add(addBtn);
         parent.Controls.Add(testBtn);
         parent.Controls.Add(editBtn);
@@ -262,6 +270,7 @@ internal sealed class MainForm : Form
         else
             _printers.Add(dlg.Lane);
         RefreshPrinterList();
+        _printerList.SelectedIndex = index ?? _printers.Count - 1;
     }
 
     private void RemovePrinter()
@@ -293,6 +302,7 @@ internal sealed class MainForm : Form
         else
             _devices.Add(dlg.Device);
         RefreshDeviceList();
+        _deviceList.SelectedIndex = index ?? _devices.Count - 1;
     }
 
     private void RemoveDevice()
