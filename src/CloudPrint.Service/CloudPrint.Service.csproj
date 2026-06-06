@@ -29,6 +29,8 @@
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) or '$(RuntimeIdentifier)' == 'win-x64'">
     <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="HidSharp" Version="2.1.0" />
   </ItemGroup>
 
 </Project>
