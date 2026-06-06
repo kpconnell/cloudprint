@@ -25,6 +25,12 @@ if (args.Length > 0 && args[0].Equals("list-devices", StringComparison.OrdinalIg
 if (args.Length > 0 && args[0].Equals("preview-device", StringComparison.OrdinalIgnoreCase))
     return await PreviewDevice();
 
+// --- Test helpers: print a ZPL test label / send a "Hello" message to a device's output ---
+if (args.Length > 0 && args[0].Equals("test-print", StringComparison.OrdinalIgnoreCase))
+    return TestPrint();
+if (args.Length > 0 && args[0].Equals("test-output", StringComparison.OrdinalIgnoreCase))
+    return await TestOutput();
+
 // --- CLI commands for install script (input via stdin as JSON) ---
 if (args.Length > 0)
 {
@@ -410,6 +416,142 @@ static async Task<int> PreviewDevice()
     return 0;
 }
 
+// Prints a built-in ZPL test label (or supplied content) to a printer, so the configurator's
+// "Test" button gives physical confirmation. Windows-only (raw printing via winspool).
+static int TestPrint()
+{
+    var input = Console.In.ReadToEnd();
+
+    TestPrintInput? req;
+    try
+    {
+        req = JsonSerializer.Deserialize<TestPrintInput>(input,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    }
+    catch (JsonException ex)
+    {
+        Console.Error.WriteLine("Invalid JSON on stdin: " + ex.Message);
+        return 1;
+    }
+
+    if (req is null || string.IsNullOrWhiteSpace(req.PrinterName))
+    {
+        Console.Error.WriteLine("Expected JSON on stdin: {\"printerName\":\"...\"}");
+        return 1;
+    }
+
+#if WINDOWS
+    var zpl = string.IsNullOrWhiteSpace(req.Content)
+        ? "^XA\n^FO40,40^A0N,50,50^FDCloudPrint^FS\n^FO40,110^A0N,35,35^FDTest Label^FS\n"
+          + "^FO40,170^A0N,28,28^FD" + req.PrinterName + "^FS\n^XZ\n"
+        : req.Content;
+
+    var tempFile = Path.Combine(Path.GetTempPath(), $"cloudprint-test-{Guid.NewGuid():N}.zpl");
+    try
+    {
+        File.WriteAllBytes(tempFile, System.Text.Encoding.ASCII.GetBytes(zpl));
+        new RawPrinter(Microsoft.Extensions.Logging.Abstractions.NullLogger<RawPrinter>.Instance)
+            .PrintRaw(tempFile, req.PrinterName, "CloudPrint Test Label");
+        Console.WriteLine($"Sent test label to {req.PrinterName}");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+    finally
+    {
+        try { File.Delete(tempFile); } catch { /* best effort */ }
+    }
+#else
+    Console.Error.WriteLine("test-print is only supported on Windows.");
+    return 1;
+#endif
+}
+
+// Publishes a synthetic "Hello" reading to a device's configured output (SQS queue or HTTP webhook),
+// so the configurator's device "Test" confirms the outbound pipe end-to-end.
+static async Task<int> TestOutput()
+{
+    var input = await Console.In.ReadToEndAsync();
+
+    TestOutputInput? req;
+    try
+    {
+        req = JsonSerializer.Deserialize<TestOutputInput>(input,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    }
+    catch (JsonException ex)
+    {
+        Console.Error.WriteLine("Invalid JSON on stdin: " + ex.Message);
+        return 1;
+    }
+
+    if (req is null || string.IsNullOrWhiteSpace(req.Transport))
+    {
+        Console.Error.WriteLine("Expected JSON on stdin with a \"transport\".");
+        return 1;
+    }
+
+    var reading = new DeviceReading
+    {
+        Station = string.IsNullOrWhiteSpace(req.Station) ? Environment.MachineName : req.Station,
+        Host = Environment.MachineName,
+        DeviceId = string.IsNullOrWhiteSpace(req.DeviceName) ? "test" : req.DeviceName,
+        DeviceType = "test",
+        Status = "ok",
+        Raw = string.IsNullOrWhiteSpace(req.Message) ? "Hello from CloudPrint" : req.Message,
+        Source = new ReadingSource { Connection = "test" },
+    };
+
+    try
+    {
+        IReadingPublisher publisher;
+        switch (req.Transport.ToLowerInvariant())
+        {
+            case "sqs":
+                if (string.IsNullOrWhiteSpace(req.QueueUrl) || string.IsNullOrWhiteSpace(req.AccessKey)
+                    || string.IsNullOrWhiteSpace(req.SecretKey) || string.IsNullOrWhiteSpace(req.Region))
+                {
+                    Console.Error.WriteLine("sqs test requires queueUrl, accessKey, secretKey, region.");
+                    return 1;
+                }
+
+                var sqs = new AmazonSQSClient(req.AccessKey, req.SecretKey,
+                    RegionEndpoint.GetBySystemName(req.Region));
+                publisher = new SqsReadingPublisher(sqs, req.QueueUrl,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<SqsReadingPublisher>.Instance);
+                break;
+
+            case "http":
+                if (string.IsNullOrWhiteSpace(req.WebhookUrl))
+                {
+                    Console.Error.WriteLine("http test requires webhookUrl.");
+                    return 1;
+                }
+
+                var output = new ResolvedOutput("http", null, req.WebhookUrl, req.HeaderName, req.HeaderValue);
+                publisher = new HttpReadingPublisher(new HttpClient(), output,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<HttpReadingPublisher>.Instance);
+                break;
+
+            default:
+                Console.Error.WriteLine($"Unknown transport: {req.Transport}");
+                return 1;
+        }
+
+        await publisher.PublishAsync(reading, CancellationToken.None);
+        Console.WriteLine($"Sent test message via {req.Transport}");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+}
+
 static int ListDevices()
 {
 #if WINDOWS
@@ -585,4 +727,27 @@ class CliInput
     public string QueueName { get; set; } = "";
     public string QueueUrl { get; set; } = "";
     public Dictionary<string, string>? Tags { get; set; }
+}
+
+// --- test-print input ---
+class TestPrintInput
+{
+    public string PrinterName { get; set; } = "";
+    public string? Content { get; set; }
+}
+
+// --- test-output input ---
+class TestOutputInput
+{
+    public string Transport { get; set; } = "";
+    public string? QueueUrl { get; set; }
+    public string? WebhookUrl { get; set; }
+    public string? HeaderName { get; set; }
+    public string? HeaderValue { get; set; }
+    public string? AccessKey { get; set; }
+    public string? SecretKey { get; set; }
+    public string? Region { get; set; }
+    public string? Station { get; set; }
+    public string? DeviceName { get; set; }
+    public string? Message { get; set; }
 }

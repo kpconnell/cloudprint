@@ -47,7 +47,7 @@ internal sealed class MainForm : Form
     {
         Text = "CloudPrint — Station Setup";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(720, 780);
+        ClientSize = new Size(720, 860);
         MinimumSize = new Size(740, 700);
         AutoScroll = true;
 
@@ -119,14 +119,16 @@ internal sealed class MainForm : Form
 
     private void BuildPrinters(ref int y)
     {
-        var group = new GroupBox { Text = "Printers", Left = 12, Top = y, Width = 690, Height = 150 };
+        var group = new GroupBox { Text = "Printers", Left = 12, Top = y, Width = 690, Height = 180 };
 
-        _printerList.SetBounds(16, 26, 540, 108);
+        _printerList.SetBounds(16, 26, 540, 140);
         group.Controls.Add(_printerList);
 
-        AddListButtons(group, 568, () => AddOrEditPrinter(null),
+        AddListButtons(group, 568, "+ Add printer",
+            () => AddOrEditPrinter(null),
+            OnTestPrinter,
             () => { if (_printerList.SelectedIndex >= 0) AddOrEditPrinter(_printerList.SelectedIndex); },
-            RemovePrinter, "+ Add printer");
+            RemovePrinter);
 
         Controls.Add(group);
         y += group.Height + 10;
@@ -134,19 +136,21 @@ internal sealed class MainForm : Form
 
     private void BuildDevices(ref int y)
     {
-        var group = new GroupBox { Text = "Scales & devices (optional)", Left = 12, Top = y, Width = 690, Height = 184 };
+        var group = new GroupBox { Text = "Scales & devices (optional)", Left = 12, Top = y, Width = 690, Height = 210 };
 
         group.Controls.Add(new Label { Text = "Station name", Left = 16, Top = 28, Width = 90 });
         _station.SetBounds(110, 24, 220, 24);
         group.Controls.Add(_station);
         group.Controls.Add(new Label { Text = "(optional — defaults to this PC's name)", Left = 340, Top = 28, AutoSize = true, ForeColor = Color.DimGray });
 
-        _deviceList.SetBounds(16, 60, 540, 108);
+        _deviceList.SetBounds(16, 60, 540, 140);
         group.Controls.Add(_deviceList);
 
-        AddListButtons(group, 568, () => AddOrEditDevice(null),
+        AddListButtons(group, 568, "+ Add device",
+            () => AddOrEditDevice(null),
+            OnTestDevice,
             () => { if (_deviceList.SelectedIndex >= 0) AddOrEditDevice(_deviceList.SelectedIndex); },
-            RemoveDevice, "+ Add device", topOffset: 34);
+            RemoveDevice, topOffset: 34);
 
         Controls.Add(group);
         y += group.Height + 10;
@@ -172,15 +176,18 @@ internal sealed class MainForm : Form
     }
 
     private static void AddListButtons(
-        Control parent, int left, Action add, Action edit, Action remove, string addText, int topOffset = 26)
+        Control parent, int left, string addText, Action add, Action test, Action edit, Action remove, int topOffset = 26)
     {
         var addBtn = new Button { Text = addText, Left = left, Top = topOffset, Width = 110 };
-        var editBtn = new Button { Text = "Edit", Left = left, Top = topOffset + 36, Width = 110 };
-        var removeBtn = new Button { Text = "Remove", Left = left, Top = topOffset + 72, Width = 110 };
+        var testBtn = new Button { Text = "Test", Left = left, Top = topOffset + 36, Width = 110 };
+        var editBtn = new Button { Text = "Edit", Left = left, Top = topOffset + 72, Width = 110 };
+        var removeBtn = new Button { Text = "Remove", Left = left, Top = topOffset + 108, Width = 110 };
         addBtn.Click += (_, _) => add();
+        testBtn.Click += (_, _) => test();
         editBtn.Click += (_, _) => edit();
         removeBtn.Click += (_, _) => remove();
         parent.Controls.Add(addBtn);
+        parent.Controls.Add(testBtn);
         parent.Controls.Add(editBtn);
         parent.Controls.Add(removeBtn);
     }
@@ -301,6 +308,113 @@ internal sealed class MainForm : Form
         _deviceList.Items.Clear();
         foreach (var d in _devices)
             _deviceList.Items.Add($"{d.Name}   [{d.Type}] → {d.Output?.Transport ?? ConfigDefaults.TransportSqs}");
+    }
+
+    // ---- Test buttons ----
+
+    private async void OnTestPrinter()
+    {
+        if (_printerList.SelectedIndex < 0)
+        {
+            MessageBox.Show(this, "Select a printer to test.", "Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var printer = _printers[_printerList.SelectedIndex].PrinterName;
+        try
+        {
+            SetBusy(true);
+            await new ServiceExeClient(new ProcessRunner(), ServiceExePath).TestPrintAsync(printer);
+            MessageBox.Show(this, $"Sent a test label to {printer}.", "Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Test failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void OnTestDevice()
+    {
+        if (_deviceList.SelectedIndex < 0)
+        {
+            MessageBox.Show(this, "Select a device to test.", "Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var device = _devices[_deviceList.SelectedIndex];
+        var output = device.Output ?? new DeviceOutputModel();
+        var station = string.IsNullOrWhiteSpace(_station.Text) ? Environment.MachineName : _station.Text.Trim();
+        var sqs = output.Transport == ConfigDefaults.TransportSqs;
+
+        if (sqs && (string.IsNullOrWhiteSpace(_accessKey.Text) || string.IsNullOrWhiteSpace(_secretKey.Text)))
+        {
+            MessageBox.Show(this, "Enter your AWS keys first — this device sends to SQS.", "Test", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!sqs && string.IsNullOrWhiteSpace(output.WebhookUrl))
+        {
+            MessageBox.Show(this, "This device has no webhook URL set.", "Test", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            SetBusy(true);
+            var client = new ServiceExeClient(new ProcessRunner(), ServiceExePath);
+            OutputTestRequest request;
+
+            if (sqs)
+            {
+                var creds = ReadCredentials();
+                var queueName = QueueNaming.ForDevice(station, device.Name);
+                var url = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
+                {
+                    ["Application"] = "cloudprint",
+                    ["Station"] = station,
+                    ["Device"] = device.Name,
+                });
+                request = new OutputTestRequest
+                {
+                    Transport = "sqs",
+                    QueueUrl = url,
+                    AccessKey = creds.AccessKey,
+                    SecretKey = creds.SecretKey,
+                    Region = creds.Region,
+                    Station = station,
+                    DeviceName = device.Name,
+                    Message = "Hello from CloudPrint",
+                };
+            }
+            else
+            {
+                request = new OutputTestRequest
+                {
+                    Transport = "http",
+                    WebhookUrl = output.WebhookUrl,
+                    HeaderName = output.HeaderName,
+                    HeaderValue = output.HeaderValue,
+                    Station = station,
+                    DeviceName = device.Name,
+                    Message = "Hello from CloudPrint",
+                };
+            }
+
+            await client.TestOutputAsync(request);
+            MessageBox.Show(this, $"Sent a 'Hello' test message to {device.Name}'s output.", "Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Test failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     // ---- Config assembly ----
