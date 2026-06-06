@@ -100,4 +100,49 @@ public class ServiceExeClientTests
         Assert.Equal(0x0001, hid.Pid);
         Assert.Equal(string.Empty, hid.Product);
     }
+
+    [Fact]
+    public async Task TestPrint_sends_printer_name()
+    {
+        var runner = new FakeProcessRunner().Enqueue(0, "Sent test label to Zebra ZP500");
+        var client = new ServiceExeClient(runner, "svc.exe");
+
+        await client.TestPrintAsync("Zebra ZP500");
+
+        var call = Assert.Single(runner.Calls);
+        Assert.Equal(new[] { "test-print" }, call.Args);
+        Assert.Contains("\"printerName\":\"Zebra ZP500\"", call.Stdin);
+    }
+
+    [Fact]
+    public async Task TestPrint_throws_on_failure()
+    {
+        var runner = new FakeProcessRunner().Enqueue(1, stderr: "Printer not found");
+        var client = new ServiceExeClient(runner, "svc.exe");
+
+        var ex = await Assert.ThrowsAsync<ServiceExeException>(() => client.TestPrintAsync("Nope"));
+        Assert.Contains("Printer not found", ex.Message);
+    }
+
+    [Fact]
+    public async Task TestOutput_sends_request_and_omits_null_fields()
+    {
+        var runner = new FakeProcessRunner().Enqueue(0, "Sent test message via sqs");
+        var client = new ServiceExeClient(runner, "svc.exe");
+
+        await client.TestOutputAsync(new OutputTestRequest
+        {
+            Transport = "sqs",
+            QueueUrl = "https://q",
+            AccessKey = "AK",
+            SecretKey = "sk",
+            Region = "us-east-1",
+        });
+
+        var call = Assert.Single(runner.Calls);
+        Assert.Equal(new[] { "test-output" }, call.Args);
+        Assert.Contains("\"transport\":\"sqs\"", call.Stdin);
+        Assert.Contains("\"queueUrl\":\"https://q\"", call.Stdin);
+        Assert.DoesNotContain("webhookUrl", call.Stdin!); // null fields omitted
+    }
 }

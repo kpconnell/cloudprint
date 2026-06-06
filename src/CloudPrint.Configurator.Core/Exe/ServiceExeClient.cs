@@ -6,6 +6,22 @@ namespace CloudPrint.Configurator.Core.Exe;
 /// <summary>AWS credentials passed to the service exe's CLI subcommands.</summary>
 public sealed record AwsCredentials(string AccessKey, string SecretKey, string Region);
 
+/// <summary>Parameters for a device-output "Hello" test (the test-output subcommand).</summary>
+public sealed record OutputTestRequest
+{
+    public string Transport { get; init; } = "sqs";
+    public string? QueueUrl { get; init; }
+    public string? WebhookUrl { get; init; }
+    public string? HeaderName { get; init; }
+    public string? HeaderValue { get; init; }
+    public string? AccessKey { get; init; }
+    public string? SecretKey { get; init; }
+    public string? Region { get; init; }
+    public string? Station { get; init; }
+    public string? DeviceName { get; init; }
+    public string? Message { get; init; }
+}
+
 /// <summary>A HID device discovered by the "list-devices" subcommand.</summary>
 public sealed record HidDeviceInfo(int Vid, int Pid, string Product);
 
@@ -75,6 +91,24 @@ public sealed class ServiceExeClient
     {
         var input = new CliInput(creds) { QueueUrl = queueUrl };
         await Run("delete-queue", input, ct);
+    }
+
+    /// <summary>Prints a built-in ZPL test label to the named printer (Windows-only subcommand).</summary>
+    public async Task TestPrintAsync(string printerName, CancellationToken ct = default)
+    {
+        var json = JsonSerializer.Serialize(new { printerName }, StdinOptions);
+        var result = await _runner.RunAsync(_exePath, new[] { "test-print" }, json, ct);
+        if (result.ExitCode != 0)
+            throw new ServiceExeException(Describe("test-print", result));
+    }
+
+    /// <summary>Publishes a "Hello" test reading to a device's output (SQS queue or HTTP webhook).</summary>
+    public async Task TestOutputAsync(OutputTestRequest request, CancellationToken ct = default)
+    {
+        var json = JsonSerializer.Serialize(request, StdinOptions);
+        var result = await _runner.RunAsync(_exePath, new[] { "test-output" }, json, ct);
+        if (result.ExitCode != 0)
+            throw new ServiceExeException(Describe("test-output", result));
     }
 
     /// <summary>Enumerates serial ports and HID devices on this machine (Windows-only subcommand).</summary>
