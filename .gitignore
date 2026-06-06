@@ -152,3 +152,6 @@ rcf/
 # Local project files
 *.rdp
 refresh-sg.sh
+
+# Service binary embedded into the configurator at CI build time (never commit the 70MB binary)
+src/CloudPrint.Configurator/CloudPrint.Service.exe

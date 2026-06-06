@@ -12,11 +12,11 @@ namespace CloudPrint.Configurator;
 /// </summary>
 internal sealed class MainForm : Form
 {
-    private static readonly string ServiceExePath =
-        Path.Combine(AppContext.BaseDirectory, InstallPaths.ServiceExeName);
+    // Resolved by InstallContext at startup: %ProgramFiles%\CloudPrint for packaged builds,
+    // or next to this exe for dev builds.
+    private static string ServiceExePath => InstallContext.ServiceExePath;
 
-    private static readonly string ConfigPath =
-        Path.Combine(AppContext.BaseDirectory, InstallPaths.ConfigFileName);
+    private static string ConfigPath => InstallContext.ConfigPath;
 
     private readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
 

@@ -44,28 +44,34 @@ jobs:
       - name: Test
         run: dotnet test --verbosity normal
 
-      # Publish a runnable package (service + configurator, both self-contained single-file, co-located
-      # so the configurator finds CloudPrint.Service.exe next to it) and upload it for manual testing.
+      # Build the one-file installer: publish the service, embed it into the configurator, publish that
+      # as a single self-contained exe, and upload it for manual testing.
       - name: Publish service
         run: >
           dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -o package
+          -o out/service
 
-      - name: Publish configurator
+      - name: Embed service into configurator
+        run: Copy-Item out/service/CloudPrint.Service.exe src/CloudPrint.Configurator/CloudPrint.Service.exe -Force
+
+      - name: Publish one-file installer
         run: >
           dotnet publish src/CloudPrint.Configurator/CloudPrint.Configurator.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -o package
+          -p:EnableCompressionInSingleFile=true
+          -o out/app
 
-      - name: Stage samples
-        run: Copy-Item samples package/samples -Recurse -Force
+      - name: Stage installer artifact
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item out/app/CloudPrint.Configurator.exe dist/CloudPrint-Setup.exe -Force
 
-      - name: Upload package
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: cloudprint-configurator-win-x64
-          path: package
+          name: CloudPrint-Setup
+          path: dist/CloudPrint-Setup.exe
           retention-days: 7

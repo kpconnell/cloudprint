@@ -17,4 +17,12 @@
     <ProjectReference Include="..\CloudPrint.Configurator.Core\CloudPrint.Configurator.Core.csproj" />
   </ItemGroup>
 
+  <!-- CI copies the published service exe here before building so it ships embedded inside the single
+       configurator exe (a true one-file installer). Absent in dev builds (handled at runtime). -->
+  <ItemGroup Condition="Exists('CloudPrint.Service.exe')">
+    <EmbeddedResource Include="CloudPrint.Service.exe">
+      <LogicalName>CloudPrint.Service.exe</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>
