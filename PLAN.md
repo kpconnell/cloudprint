@@ -1,6 +1,61 @@
 # CloudPrint - Implementation Plan
 
+> **Note:** This is the original print-only implementation plan and is kept for history; parts have drifted from the current code. CloudPrint is now a **bidirectional cloud ⇆ local-device bridge**: it both receives print jobs (cloud → device) and forwards device telemetry (device → cloud). See [README.md](README.md) for current behavior and the [Device Telemetry](#device-telemetry-subsystem) section below for the outbound subsystem.
+
 ## Overview
+
+A Windows Service that bridges the cloud and locally connected devices in both directions:
+- **Printing:** long-polls AWS SQS (or an HTTP API) for print jobs and routes them to local printers.
+- **Device telemetry:** reads locally connected devices (USB/serial scales) and publishes readings outbound over SQS or an HTTP webhook.
+
+Both share transports and credentials; device telemetry is opt-in via `Devices[]`.
+
+## Device Telemetry Subsystem
+
+Mirrors the inbound print pipeline in reverse — `IDeviceReader.ReadAsync → DeviceReading → IReadingPublisher.PublishAsync` — with one `DeviceForwardingService` (BackgroundService) per configured device, registered alongside the SQS print lanes in `Program.cs`.
+
+```
+src/CloudPrint.Service/
+├── Devices/
+│   ├── DeviceReading.cs            # normalized reading model (station/host/source identity)
+│   ├── IDeviceReader.cs            # per-device reader seam (connect/read/reconnect)
+│   ├── DeviceForwardingService.cs  # per-device BackgroundService (read → publish)
+│   ├── DeviceReaderRegistry.cs     # device type → factory (extension point)
+│   ├── ReadingDeduplicator.cs      # suppress repeated identical readings
+│   ├── ReconnectBackoff.cs         # capped reconnect backoff
+│   ├── Parsing/                    # SerialScaleParser, HidPosReportParser, PatternExtractor
+│   └── Readers/                    # SerialDeviceReader, HidDeviceReader (#if WINDOWS), SimulatedDeviceReader
+└── Publishing/
+    ├── IReadingPublisher.cs        # outbound transport seam
+    ├── SqsReadingPublisher.cs      # SQS SendMessage
+    ├── HttpReadingPublisher.cs     # HTTPS webhook POST (SSRF-validated)
+    └── DryRunReadingPublisher.cs   # logs instead of publishing (dry-run / non-Windows)
+```
+
+Device types: `serial-scale` (System.IO.Ports), `hid-scale` (HidSharp, descriptor-tolerant + per-device offset overrides), and `serial-raw`/`hid-raw` generic passthrough. Adding a new device type = one reader + one factory + one DI registration. Serial/HID readers are Windows-only (`#if WINDOWS`); a `SimulatedDeviceReader` runs on non-Windows and in dry-run so the full pipeline is testable without hardware.
+
+### Device Reading Schema
+
+```json
+{
+  "readingId": "8a1f...",
+  "station": "shipping-pc-01",
+  "host": "SHIPPING-PC-01",
+  "deviceId": "scale-shipping",
+  "deviceType": "serial-scale",
+  "source": { "connection": "serial", "port": "COM3" },
+  "timestamp": "2026-06-06T17:55:05Z",
+  "value": 2.5,
+  "unit": "kg",
+  "stable": true,
+  "status": "ok",
+  "raw": "ST,+00002.50 kg"
+}
+```
+
+---
+
+## (Historical) Print-only plan
 
 A Windows Service that long-polls AWS SQS queues for print jobs and routes them to local printers. One queue per machine, one service per machine.
 

@@ -30,6 +30,9 @@ public class ReadingDeduplicator
         _lastCommit = now;
     }
 
+    // Raw is part of the key so generic passthrough (where Value/Unit are null) still forwards
+    // every distinct frame. For scales, an unchanged stable weight has identical Raw too, so
+    // repeats are still suppressed.
     private static string Key(DeviceReading r) =>
-        $"{r.Value}|{r.Unit}|{r.Stable}|{r.Status}";
+        $"{r.Value}|{r.Unit}|{r.Stable}|{r.Status}|{r.Raw}";
 }

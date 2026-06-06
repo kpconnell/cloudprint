@@ -1,10 +1,15 @@
 # CloudPrint
 
-A Windows Service that receives print jobs from the cloud and routes them to local printers. Designed for environments where cloud applications need to print to on-premise printers (shipping labels, receipts, documents).
+A Windows Service that bridges the cloud and the devices physically connected to a workstation — in **both** directions:
 
-Supports two transport modes:
-- **AWS SQS** — polls SQS queues for jobs (auto-provisioned per machine/printer; multiple printers per machine supported)
-- **HTTP API** — long-polls your own API for jobs (single printer; bring your own server)
+- **Printing (cloud → device):** receives print jobs from the cloud and routes them to local printers (shipping labels, receipts, documents).
+- **Device telemetry (device → cloud):** reads data from locally connected devices (USB/serial scales) and publishes it outbound, so back-end systems (WMS/shipping) get live readings without anyone keying them in.
+
+Both directions share the same transports and credentials, and either capability can run on its own. Device telemetry is opt-in (configure `Devices[]`) and runs independently of the print transport.
+
+**Transports**
+- **AWS SQS** — polls SQS queues for print jobs (auto-provisioned per machine/printer; multiple printers per machine supported) and publishes device readings via `SendMessage`.
+- **HTTP API** — long-polls your own API for print jobs (single printer; bring your own server); device readings can POST to an HTTPS webhook.
 
 ## Quick Install
 
@@ -209,7 +214,8 @@ In the [IAM Console](https://console.aws.amazon.com/iam/), go to **Policies** �
                 "sqs:GetQueueAttributes",
                 "sqs:GetQueueUrl",
                 "sqs:ReceiveMessage",
-                "sqs:DeleteMessage"
+                "sqs:DeleteMessage",
+                "sqs:SendMessage"
             ],
             "Resource": "arn:aws:sqs:*:*:cloudprint-*"
         },
@@ -242,6 +248,7 @@ Name the policy `CloudPrintSQSAccess`.
 | `sqs:ListQueues` | Finds existing `cloudprint-{hostname}-*` queues on reinstall (no resource scoping for list ops) |
 | `sqs:ReceiveMessage` | Long-polls the queue for print jobs |
 | `sqs:DeleteMessage` | Removes a message after successful printing |
+| `sqs:SendMessage` | Publishes device telemetry readings to an output queue (device telemetry only) |
 | `sts:GetCallerIdentity` | Validates credentials during installation |
 
 > Note: `ListQueueTags` is not in this policy — that permission belongs to whatever **sends** print jobs (so it can discover what printers are available), not the CloudPrint service itself.
@@ -377,10 +384,114 @@ loop:
 
 No client-side poll interval is needed — the long-poll timeout IS the wait.
 
+## Device Telemetry
+
+Beyond printing, CloudPrint can read from devices physically connected to the workstation and publish their readings to the cloud. The first-class devices are **USB/serial scales**; a generic passthrough mode forwards any serial/HID device. This is opt-in: it activates only when `Devices[]` is non-empty, and runs regardless of the print `Transport`.
+
+Each configured device runs its own background loop: connect → read → publish, with automatic reconnect (capped backoff) and de-duplication of repeated identical readings.
+
+### Configuration
+
+Add a `Devices` array under `CloudPrint`. See [`samples/appsettings.sample.json`](samples/appsettings.sample.json) for a complete, multi-device example.
+
+```json
+{
+  "CloudPrint": {
+    "Station": "shipping-pc-01",
+    "DevicePollIntervalMs": 500,
+    "DeviceStableOnly": true,
+    "Devices": [
+      {
+        "Name": "scale-shipping",
+        "Type": "serial-scale",
+        "Protocol": "mt-sics",
+        "ComPort": "COM3",
+        "BaudRate": 9600,
+        "LineEnding": "crlf",
+        "PollMode": "request",
+        "RequestCommand": "S",
+        "InitCommands": [ "Z" ],
+        "Output": { "Transport": "sqs", "QueueUrl": "https://sqs.us-east-1.amazonaws.com/123/cloudprint-shipping-pc-01-scale-shipping" }
+      },
+      {
+        "Name": "scale-counter",
+        "Type": "hid-scale",
+        "Vid": 2338,
+        "Pid": 24613,
+        "PollMode": "stream",
+        "Output": { "Transport": "http", "WebhookUrl": "https://wms.example.com/api/readings", "HeaderName": "X-Api-Key", "HeaderValue": "..." }
+      }
+    ]
+  }
+}
+```
+
+| Field | Applies to | Description |
+|---|---|---|
+| `Name` | all | Unique device id; used as `deviceId` and the log tag. Required. |
+| `Type` | all | `serial-scale`, `hid-scale`, `serial-raw`, or `hid-raw`. |
+| `Station` | all | Per-device workstation id override (top-level `Station` is the default; blank → machine name). |
+| `Protocol` | serial | Serial parser selector (default `mt-sics`; tolerant of common A&D/Ohaus/MT-SICS ASCII formats). |
+| `ComPort`, `BaudRate`, `Parity`, `DataBits`, `StopBits` | serial | Port settings (defaults 9600/None/8/1). |
+| `LineEnding` | serial | Frame terminator: `crlf`, `lf`, `cr`, or a literal string (default `crlf`). |
+| `Encoding` | serial | `ascii` (default) or `utf8`. |
+| `RequestCommand` | serial | Command sent each cycle in `request`/`interval` mode (e.g. MT-SICS `S`). |
+| `InitCommands` | serial | Commands sent once on connect (e.g. `Z` to zero/tare). |
+| `Vid`, `Pid` | hid | USB vendor/product id (decimal). Find them with `cloudprint list-devices`. |
+| `Hid*Offset` / `HidReportId` / `HidWeightSize` | hid | Optional manual report-layout overrides for non-conformant HID scales. |
+| `Pattern` | raw | Regex with named groups `value`, `unit`, `stable` for `*-raw` passthrough. Omit to forward the raw frame only. |
+| `PollMode` | all | `stream` (read continuously), `request`, or `interval` (default `stream`). |
+| `PollIntervalMs` | all | Poll cadence for request/interval modes (top-level `DevicePollIntervalMs` is the default). |
+| `StableOnly` | all | Publish only readings the device marks stable (top-level `DeviceStableOnly` is the default; `true`). |
+| `Output.Transport` | all | `sqs` or `http` — chosen per device. |
+| `Output.QueueUrl` | sqs | Target SQS queue (requires `sqs:SendMessage`; a `cloudprint-*` name is already in IAM scope). |
+| `Output.WebhookUrl`, `Output.HeaderName`, `Output.HeaderValue` | http | HTTPS webhook (validated for SSRF) and optional auth header. |
+
+### Reading format
+
+Each reading is published as JSON:
+
+```json
+{
+  "readingId": "8a1f...",
+  "station": "shipping-pc-01",
+  "host": "SHIPPING-PC-01",
+  "deviceId": "scale-shipping",
+  "deviceType": "serial-scale",
+  "source": { "connection": "serial", "port": "COM3" },
+  "timestamp": "2026-06-06T17:55:05.123Z",
+  "value": 2.5,
+  "unit": "kg",
+  "stable": true,
+  "status": "ok",
+  "raw": "ST,+00002.50 kg"
+}
+```
+
+`status` is one of `ok | motion | overload | underload | zero | error`. HID readings carry `source.vid`/`source.pid`/`source.product`; raw passthrough readings populate `raw` with `value` left null when no `Pattern` matches.
+
+### Supported devices & drivers
+
+| Type | Connection | Driver |
+|---|---|---|
+| `serial-scale` | RS-232 / USB-CDC virtual COM port (Mettler Toledo MT-SICS, A&D, Ohaus, CAS) | Requires the vendor **VCP driver** (FTDI/Prolific/CP210x) installed so a COM port appears. |
+| `hid-scale` | USB HID POS scale (HID usage page `0x8D`) | **No driver** — uses the in-box Windows HID driver. Must not be exclusively claimed by another app (e.g. a POS/`ClaimedScale` app); if it is, CloudPrint logs the failure and retries. |
+| `serial-raw` / `hid-raw` | Any serial / HID device | Same driver rules as above; forwards frames with optional regex extraction. |
+
+Hot-plug is handled by reconnect-with-backoff (the service polls and re-opens the device), so unplug/replug recovers automatically.
+
+### Finding devices
+
+On the target machine, list connected COM ports and HID devices (VID/PID/product) to fill in the config:
+
+```
+cloudprint list-devices
+```
+
 ## Security
 
 - **Credentials**: Stored in `appsettings.json` with file ACLs restricted to Administrators and SYSTEM only
-- **URL validation**: Only HTTPS URLs are accepted; loopback addresses are blocked (SSRF prevention)
+- **URL validation**: Only HTTPS URLs are accepted; loopback and private/reserved addresses are blocked, including via DNS resolution (SSRF prevention). Applies to both inbound file downloads and outbound device webhooks.
 - **File validation**: Downloaded files are checked against magic bytes for the claimed content type
 - **File size limit**: Downloads are capped at 50MB
 - **Credential passing**: Install script passes credentials to the service binary via stdin (not visible in process listings)

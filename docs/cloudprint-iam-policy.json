@@ -12,7 +12,8 @@
                 "sqs:GetQueueAttributes",
                 "sqs:GetQueueUrl",
                 "sqs:ReceiveMessage",
-                "sqs:DeleteMessage"
+                "sqs:DeleteMessage",
+                "sqs:SendMessage"
             ],
             "Resource": "arn:aws:sqs:*:*:cloudprint-*"
         },

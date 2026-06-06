@@ -23,7 +23,8 @@ CloudPrint needs AWS credentials with access to SQS queues. These credentials sh
                 "sqs:GetQueueAttributes",
                 "sqs:GetQueueUrl",
                 "sqs:ReceiveMessage",
-                "sqs:DeleteMessage"
+                "sqs:DeleteMessage",
+                "sqs:SendMessage"
             ],
             "Resource": "arn:aws:sqs:*:*:cloudprint-*"
         },
@@ -58,6 +59,7 @@ CloudPrint needs AWS credentials with access to SQS queues. These credentials sh
 | `sqs:ListQueues` | Finds existing `cloudprint-{hostname}-*` queues on reinstall (this action has no resource scoping in IAM) |
 | `sqs:ReceiveMessage` | Long-polls the queue for print jobs |
 | `sqs:DeleteMessage` | Removes a message after a job prints successfully |
+| `sqs:SendMessage` | Publishes device telemetry readings to a `cloudprint-*` output queue (device telemetry only) |
 | `sts:GetCallerIdentity` | Validates credentials during installation |
 
 > **Discovery permission for senders:** Whatever **sends** print jobs typically also wants to discover what printers are available. That side needs `sqs:ListQueues` plus `sqs:ListQueueTags` on `cloudprint-*`. Those permissions are *not* in this policy — they belong to the publisher, not the CloudPrint service.
@@ -81,13 +83,13 @@ These two values are what you'll provide during CloudPrint installation. The ins
 With the policy above, the credentials can **only**:
 - Create, tag, configure, and delete queues named `cloudprint-*`
 - List queues (filtered by prefix at call time, scoped in practice to `cloudprint-{hostname}-*`)
-- Receive and delete messages from `cloudprint-*` queues
+- Receive and delete messages from `cloudprint-*` queues (print jobs)
+- Send messages to `cloudprint-*` queues (device telemetry readings)
 - Look up queue URLs and attributes
 - Verify their own identity (STS)
 
 They **cannot**:
-- Send messages to any queue
-- Touch any queue not named `cloudprint-*`
+- Send to, or otherwise touch, any queue not named `cloudprint-*`
 - Access any other AWS service (S3, EC2, Lambda, etc.) beyond the read-only `sts:GetCallerIdentity` call used during install
 
 ## Sharing Credentials Across Machines

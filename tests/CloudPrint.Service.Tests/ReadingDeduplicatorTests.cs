@@ -34,6 +34,19 @@ public class ReadingDeduplicatorTests
     }
 
     [Fact]
+    public void Raw_passthrough_frames_with_distinct_raw_are_not_duplicates()
+    {
+        // Generic passthrough: Value/Unit null, but each frame's Raw differs — all must forward.
+        var dedup = new ReadingDeduplicator();
+        var a = new DeviceReading { Stable = true, Status = "ok", Raw = "barcode-111" };
+        var b = new DeviceReading { Stable = true, Status = "ok", Raw = "barcode-222" };
+
+        Assert.False(dedup.IsDuplicate(a, DateTimeOffset.UnixEpoch));
+        dedup.Commit(a, DateTimeOffset.UnixEpoch);
+        Assert.False(dedup.IsDuplicate(b, DateTimeOffset.UnixEpoch));
+    }
+
+    [Fact]
     public void Heartbeat_allows_republish_after_window()
     {
         var dedup = new ReadingDeduplicator(TimeSpan.FromSeconds(10));
