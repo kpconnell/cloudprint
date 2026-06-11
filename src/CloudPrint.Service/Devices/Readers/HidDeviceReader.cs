@@ -38,6 +38,8 @@ public class HidDeviceReader : IDeviceReader
         if (_device.Vid is null || _device.Pid is null)
             throw new DeviceConnectionException($"HID device '{_device.Name}' requires Vid and Pid");
 
+        Teardown(); // release any stale handle from a previous connection before reopening
+
         var hid = DeviceList.Local.GetHidDevices(_device.Vid, _device.Pid).FirstOrDefault()
             ?? throw new DeviceConnectionException(
                 $"HID device VID={_device.Vid:X4} PID={_device.Pid:X4} not found for '{_device.Name}'");
@@ -78,14 +80,23 @@ public class HidDeviceReader : IDeviceReader
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
+            // The stream is dead after a read error (typically unplug) — release it so
+            // IsConnected goes false and the forwarding loop reconnects.
+            Teardown();
             throw new DeviceConnectionException($"HID read failed for '{_device.Name}'", ex);
         }
     }
 
+    private void Teardown()
+    {
+        try { _stream?.Dispose(); }
+        catch { /* disposing a surprise-removed device can throw; the handle is gone either way */ }
+        _stream = null;
+    }
+
     public ValueTask DisposeAsync()
     {
-        _stream?.Dispose();
-        _stream = null;
+        Teardown();
         return ValueTask.CompletedTask;
     }
 }

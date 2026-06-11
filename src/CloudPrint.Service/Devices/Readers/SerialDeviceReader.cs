@@ -35,9 +35,12 @@ public class SerialDeviceReader : IDeviceReader
         if (string.IsNullOrWhiteSpace(_device.ComPort))
             throw new DeviceConnectionException($"Device '{_device.Name}' has no ComPort configured");
 
+        Teardown(); // a leaked open SerialPort keeps the COM port locked, blocking the reopen
+
+        SerialPort? port = null;
         try
         {
-            var port = new SerialPort(_device.ComPort, _device.BaudRate, ParseParity(_device.Parity),
+            port = new SerialPort(_device.ComPort, _device.BaudRate, ParseParity(_device.Parity),
                 _device.DataBits, ParseStopBits(_device.StopBits))
             {
                 ReadTimeout = 2000,
@@ -47,17 +50,21 @@ public class SerialDeviceReader : IDeviceReader
             };
 
             port.Open();
-            _port = port;
 
             foreach (var command in _device.InitCommands)
-                _port.Write(command + _port.NewLine);
+                port.Write(command + port.NewLine);
+
+            _port = port;
 
             _logger.LogInformation("[device/{Name}] opened serial port {Port} ({Baud} baud)",
                 _device.Name, _device.ComPort, _device.BaudRate);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException
-                                       or ArgumentException or InvalidOperationException)
+                                       or ArgumentException or InvalidOperationException
+                                       or TimeoutException)
         {
+            try { port?.Dispose(); }
+            catch { /* disposing a surprise-removed device can throw; the handle is gone either way */ }
             throw new DeviceConnectionException(
                 $"Failed to open serial port {_device.ComPort} for '{_device.Name}'", ex);
         }
@@ -69,7 +76,10 @@ public class SerialDeviceReader : IDeviceReader
     {
         var port = _port;
         if (port is null || !port.IsOpen)
+        {
+            Teardown();
             throw new DeviceConnectionException($"Serial port not open for '{_device.Name}'");
+        }
 
         try
         {
@@ -90,6 +100,10 @@ public class SerialDeviceReader : IDeviceReader
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
         {
+            // The port is dead after a read error (typically USB-serial unplug, where IsOpen
+            // stays true) — release it so IsConnected goes false and the forwarding loop
+            // reconnects, and so the COM handle is freed for the reopen.
+            Teardown();
             throw new DeviceConnectionException($"Serial read failed for '{_device.Name}'", ex);
         }
     }
@@ -102,10 +116,16 @@ public class SerialDeviceReader : IDeviceReader
             catch (TimeoutException) { return null; }
         }, cancellationToken);
 
+    private void Teardown()
+    {
+        try { _port?.Dispose(); }
+        catch { /* disposing a surprise-removed device can throw; the handle is gone either way */ }
+        _port = null;
+    }
+
     public ValueTask DisposeAsync()
     {
-        _port?.Dispose();
-        _port = null;
+        Teardown();
         return ValueTask.CompletedTask;
     }
 

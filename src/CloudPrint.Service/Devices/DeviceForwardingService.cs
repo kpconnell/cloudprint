@@ -84,6 +84,7 @@ public class DeviceForwardingService : BackgroundService
                 var delay = backoff.Next();
                 _logger.LogWarning(ex, "[{Identifier}] device disconnected; reconnecting in {Delay}s",
                     _identifier, delay.TotalSeconds);
+                await ReleaseDeadConnection();
                 await DelaySafe(delay, stoppingToken);
             }
             catch (Exception ex)
@@ -96,6 +97,27 @@ public class DeviceForwardingService : BackgroundService
         _logger.LogInformation("CloudPrint device forwarding stopping: {Identifier}", _identifier);
 
         await _reader.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Drops the reader's handle after a connection failure so the next iteration re-enters
+    /// ConnectAsync. Readers tear down on read errors themselves, but a handle can still look
+    /// open after a failure (e.g. SerialPort.IsOpen stays true after a USB unplug), which would
+    /// otherwise leave the loop re-reading a dead handle forever.
+    /// </summary>
+    private async Task ReleaseDeadConnection()
+    {
+        if (!_reader.IsConnected)
+            return;
+
+        try
+        {
+            await _reader.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[{Identifier}] error releasing device handle", _identifier);
+        }
     }
 
     private void Stamp(DeviceReading reading)

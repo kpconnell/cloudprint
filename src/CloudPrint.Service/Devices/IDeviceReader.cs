@@ -4,6 +4,8 @@ namespace CloudPrint.Service.Devices;
 /// Reads telemetry from a single physical device. Owns connect, the read loop, and parsing.
 /// The outbound analogue of <see cref="Transport.IJobSource"/>. Implementations hold native
 /// handles (serial port / HID stream), hence <see cref="IAsyncDisposable"/>.
+/// DisposeAsync only releases the handle — implementations must support ConnectAsync again
+/// afterwards; the forwarding loop uses this to force a reconnect after a dead handle.
 /// </summary>
 public interface IDeviceReader : IAsyncDisposable
 {

@@ -100,6 +100,42 @@ public class DeviceForwardingServiceTests
     }
 
     [Fact]
+    public async Task Read_disconnect_releases_handle_and_reconnects()
+    {
+        // Regression: after a mid-read disconnect the native handle can still look open
+        // (e.g. SerialPort.IsOpen stays true after a USB unplug). The loop must drop the
+        // handle and re-enter ConnectAsync rather than re-read the dead handle forever.
+        var reader = new Mock<IDeviceReader>();
+        var connected = false;
+        reader.SetupGet(r => r.IsConnected).Returns(() => connected);
+        reader.Setup(r => r.ConnectAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => connected = true).Returns(Task.CompletedTask);
+        reader.Setup(r => r.DisposeAsync())
+            .Callback(() => connected = false).Returns(ValueTask.CompletedTask);
+        reader.SetupGet(r => r.DeviceId).Returns("dev1");
+        reader.SetupGet(r => r.DeviceType).Returns("serial-scale");
+        reader.SetupGet(r => r.Source).Returns(new ReadingSource { Connection = "serial", Port = "COM3" });
+
+        var reads = 0;
+        reader.Setup(r => r.ReadAsync(It.IsAny<CancellationToken>()))
+            .Returns(() => ++reads == 1
+                ? Task.FromException<DeviceReading?>(new DeviceConnectionException("device unplugged"))
+                : Task.FromResult<DeviceReading?>(null));
+
+        var publisher = new Mock<IReadingPublisher>();
+        var service = Create(reader.Object, publisher.Object);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await service.StartAsync(cts.Token);
+        await Task.Delay(2000); // first reconnect backoff step is 1s
+        await service.StopAsync(CancellationToken.None);
+
+        reader.Verify(r => r.DisposeAsync(), Times.AtLeastOnce);
+        reader.Verify(r => r.ConnectAsync(It.IsAny<CancellationToken>()), Times.AtLeast(2));
+        Assert.True(reads >= 2, "loop should resume reading after reconnect");
+    }
+
+    [Fact]
     public async Task Publisher_exception_does_not_crash_loop()
     {
         var reader = ConnectedReader();
