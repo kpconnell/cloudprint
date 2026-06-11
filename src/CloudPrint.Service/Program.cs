@@ -177,7 +177,10 @@ static void RegisterSqsLanes(HostApplicationBuilder builder, CloudPrintOptions o
     }
 
     Log.Information("CloudPrint configured for {LaneCount} SQS lane(s): {Printers}",
-        lanes.Count, string.Join(", ", lanes.Select(l => l.PrinterName)));
+        lanes.Count, string.Join(", ", lanes.Select(l =>
+            $"{l.PrinterName} ({l.PdfRenderDpi} DPI, {l.PdfFitMode}, " +
+            $"paper={(string.IsNullOrEmpty(l.PdfPaperSize) ? "driver default" : l.PdfPaperSize)}" +
+            $"{(l.PdfMonochrome ? ", B/W" : "")})")));
 
     builder.Services.AddSingleton<IAmazonSQS>(_ => new AmazonSQSClient(
         options.AwsAccessKeyId,
@@ -232,7 +235,8 @@ static void RegisterHttpTransport(HostApplicationBuilder builder, CloudPrintOpti
         QueueUrl: string.Empty,
         PdfRenderDpi: options.PdfRenderDpi,
         PdfFitMode: options.PdfFitMode,
-        PdfMonochrome: options.PdfMonochrome);
+        PdfMonochrome: options.PdfMonochrome,
+        PdfPaperSize: options.PdfPaperSize);
 
     builder.Services.AddHttpClient<HttpApiJobSource>();
     builder.Services.AddSingleton<IJobSource>(sp => sp.GetRequiredService<HttpApiJobSource>());

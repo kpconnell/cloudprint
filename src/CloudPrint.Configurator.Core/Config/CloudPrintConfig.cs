@@ -36,6 +36,7 @@ public sealed class CloudPrintConfig
     public int? PdfRenderDpi { get; set; }
     public string? PdfFitMode { get; set; }
     public bool? PdfMonochrome { get; set; }
+    public string? PdfPaperSize { get; set; }
 
     // Debug payload dumping.
     public bool DumpPayloads { get; set; }
@@ -56,6 +57,7 @@ public sealed class PrinterLaneModel
     public int? PdfRenderDpi { get; set; }
     public string? PdfFitMode { get; set; }
     public bool? PdfMonochrome { get; set; }
+    public string? PdfPaperSize { get; set; }
 }
 
 /// <summary>One outbound telemetry device. Mirrors CloudPrint.Service.Configuration.DeviceConfig.</summary>

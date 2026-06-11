@@ -114,6 +114,36 @@ public class CloudPrintOptionsTests
     }
 
     [Fact]
+    public void Lane_paper_size_overrides_global_and_inherits_when_unset()
+    {
+        var options = new CloudPrintOptions
+        {
+            PdfPaperSize = "Letter",
+            Printers =
+            {
+                new PrinterLane { PrinterName = "Thermal", QueueUrl = "https://q1", PdfPaperSize = "4x6" },
+                new PrinterLane { PrinterName = "Laser", QueueUrl = "https://q2" }
+            }
+        };
+
+        var lanes = options.ResolvedSqsLanes();
+
+        Assert.Equal("4x6", lanes[0].PdfPaperSize);
+        Assert.Equal("Letter", lanes[1].PdfPaperSize); // inherited from global
+    }
+
+    [Fact]
+    public void Paper_size_defaults_to_empty_meaning_driver_default()
+    {
+        var options = new CloudPrintOptions
+        {
+            Printers = { new PrinterLane { PrinterName = "P", QueueUrl = "https://q" } }
+        };
+
+        Assert.Equal(string.Empty, options.ResolvedSqsLanes()[0].PdfPaperSize);
+    }
+
+    [Fact]
     public void Global_monochrome_applies_to_lanes_without_override()
     {
         var options = new CloudPrintOptions

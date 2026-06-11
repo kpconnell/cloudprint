@@ -34,6 +34,9 @@ public class CloudPrintOptions
     public int PdfRenderDpi { get; set; } = 300;
     public string PdfFitMode { get; set; } = "Margins";
     public bool PdfMonochrome { get; set; } = false;
+    // Stock loaded in the printer ("4x6", "2x2", "Letter", "A4", or "WxH" inches).
+    // Empty = the Windows queue's driver default paper.
+    public string PdfPaperSize { get; set; } = string.Empty;
 
     // Debug
     public bool DumpPayloads { get; set; } = false;
@@ -67,7 +70,8 @@ public class CloudPrintOptions
         QueueUrl: lane.QueueUrl,
         PdfRenderDpi: lane.PdfRenderDpi is > 0 ? lane.PdfRenderDpi.Value : PdfRenderDpi,
         PdfFitMode: !string.IsNullOrWhiteSpace(lane.PdfFitMode) ? lane.PdfFitMode! : PdfFitMode,
-        PdfMonochrome: lane.PdfMonochrome ?? PdfMonochrome);
+        PdfMonochrome: lane.PdfMonochrome ?? PdfMonochrome,
+        PdfPaperSize: !string.IsNullOrWhiteSpace(lane.PdfPaperSize) ? lane.PdfPaperSize! : PdfPaperSize);
 
     /// <summary>
     /// Resolves configured devices with global defaults applied. Entries without a Name are skipped.
@@ -117,10 +121,12 @@ public class PrinterLane
     public int? PdfRenderDpi { get; set; }
     public string? PdfFitMode { get; set; }
     public bool? PdfMonochrome { get; set; }
+    public string? PdfPaperSize { get; set; }
 }
 
 public record ResolvedLane(
-    string PrinterName, string QueueUrl, int PdfRenderDpi, string PdfFitMode, bool PdfMonochrome = false);
+    string PrinterName, string QueueUrl, int PdfRenderDpi, string PdfFitMode,
+    bool PdfMonochrome = false, string PdfPaperSize = "");
 
 /// <summary>Raw device configuration as bound from appsettings.json.</summary>
 public class DeviceConfig

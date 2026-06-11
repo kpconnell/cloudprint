@@ -48,10 +48,17 @@ public static class ConfigDefaults
     public const int MinPdfRenderDpi = 72;
     public const int MaxPdfRenderDpi = 1200;
 
+    // Paper sizes: what's loaded in the printer. Empty string = the Windows queue's
+    // driver default. The label shown in the UI for the empty value is PaperDriverDefaultLabel.
+    public const string PaperDriverDefault = "";
+    public const string PaperDriverDefaultLabel = "Driver default";
+    public static readonly IReadOnlyList<string> PaperSizes = new[] { "2x2", "4x6", "Letter", "A4" };
+
     // Defaults (mirror CloudPrint.Service.Configuration.CloudPrintOptions)
     public const int DefaultPdfRenderDpi = 300;
     public const string DefaultPdfFitMode = FitMargins;
     public const bool DefaultPdfMonochrome = false;
+    public const string DefaultPdfPaperSize = PaperDriverDefault;
     public const int DefaultVisibilityTimeoutSeconds = 300;
     public const int DefaultHttpPollTimeoutSeconds = 30;
     public const int DefaultBaudRate = 9600;
