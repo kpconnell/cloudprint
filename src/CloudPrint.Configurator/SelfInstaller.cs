@@ -7,7 +7,7 @@ namespace CloudPrint.Configurator;
 /// <summary>
 /// Self-install logic for the one-file installer: extracts the embedded service binary into
 /// %ProgramFiles%\CloudPrint, drops a copy of itself there for later reconfiguration, and registers
-/// an Add/Remove Programs entry. Also handles --uninstall. Mirrors what scripts/install.ps1 set up.
+/// an Add/Remove Programs entry. Also handles --uninstall.
 /// </summary>
 internal static class SelfInstaller
 {

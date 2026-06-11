@@ -1,6 +1,6 @@
 namespace CloudPrint.Configurator.Core.Config;
 
-/// <summary>Well-known install locations and names (mirrors scripts/install.ps1).</summary>
+/// <summary>Well-known install locations and names.</summary>
 public static class InstallPaths
 {
     public const string ServiceName = "CloudPrint";

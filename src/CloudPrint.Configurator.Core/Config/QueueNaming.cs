@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 namespace CloudPrint.Configurator.Core.Config;
 
 /// <summary>
-/// Builds SQS queue names from station/printer/device identifiers, matching the scheme in
-/// scripts/install.ps1 (Get-QueueName): "cloudprint-{prefix}-{sanitized-name}", lowercased,
+/// Builds SQS queue names from station/printer/device identifiers:
+/// "cloudprint-{prefix}-{sanitized-name}", lowercased,
 /// non-alphanumeric runs collapsed to hyphens, capped so the "-dlq" suffix fits SQS's 80-char limit.
 /// </summary>
 public static partial class QueueNaming

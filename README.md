@@ -13,22 +13,16 @@ Both directions share the same transports and credentials, and either capability
 
 ## Quick Install
 
-Open PowerShell **as Administrator** and run:
+Download [`CloudPrint-Setup.exe`](https://github.com/kpconnell/cloudprint/releases/latest/download/CloudPrint-Setup.exe) from the latest release and run it (it prompts for elevation).
 
-```powershell
-irm https://github.com/kpconnell/cloudprint/releases/latest/download/install.ps1 | iex
-```
+The installer:
+1. Extracts the service binary to `C:\Program Files\CloudPrint` and registers an Add/Remove Programs entry
+2. Opens the configurator, where you choose the transport (SQS or HTTP) and enter credentials (AWS keys or API URL + key)
+3. Lets you add one or more printers — and, optionally, USB/serial devices (scales) for telemetry — with live detection and test buttons
+4. Per printer, optionally customize PDF render DPI / fit mode (defaults are fine for most printers)
+5. On **Install**, auto-creates any missing SQS queues, writes the locked-down config, and registers + starts the Windows Service
 
-The installer will:
-1. Ask which transport to use (SQS or HTTP)
-2. Prompt for transport-specific configuration (AWS credentials or API URL + key)
-3. **SQS**: walk you through configuring one or more printers (loop "Add another printer? [y/N]"). **HTTP**: prompt for a single printer.
-4. For each printer, optionally customize PDF render DPI / fit mode (defaults are fine for most printers)
-5. Install and start the Windows Service
-
-On reinstall, existing configuration is shown and you can **K**eep all printers, **E**dit the list, or **W**ipe and start over. AWS credentials and other settings prompt with the existing value as the default — press Enter to keep.
-
-> **Note:** Reinstall on the SQS transport deletes all `cloudprint-{hostname}-*` queues for the machine and recreates them from the new printer list. AWS reserves queue names for ~60 seconds after deletion, so wait briefly if you re-run with the same names.
+To reconfigure later, run `CloudPrint.exe` from `C:\Program Files\CloudPrint` (or re-run the setup exe) — it loads the existing configuration so you can edit and re-install. Missing queues are created; queues for removed printers/devices are left in place (delete them in the AWS console if you no longer want them).
 
 ## How It Works
 
@@ -122,9 +116,9 @@ PDFs are rasterized to a bitmap, then sent through the Windows printing pipeline
 | `PdfRenderDpi` | `300` | Rasterization resolution. `203` for thermal label printers, `300` for office, `600` for high-fidelity reports. Higher DPI = more memory per page. |
 | `PdfFitMode` | `Margins` | `Margins` fits within the driver-reported page margins (office printers). `PhysicalPage` prints edge-to-edge ignoring margins (thermal/label printers). |
 
-**Per-printer overrides (SQS):** Each entry in `Printers[]` may set its own `PdfRenderDpi` / `PdfFitMode`. When a lane omits a value, it falls back to the top-level default. This lets a thermal label printer (`203` / `PhysicalPage`) and an office laser (`300` / `Margins`) coexist on the same machine. The installer prompts per printer; the top-level values are the defaults you'll see in subsequent prompts.
+**Per-printer overrides (SQS):** Each entry in `Printers[]` may set its own `PdfRenderDpi` / `PdfFitMode`. When a lane omits a value, it falls back to the top-level default. This lets a thermal label printer (`203` / `PhysicalPage`) and an office laser (`300` / `Margins`) coexist on the same machine. The configurator exposes these per printer.
 
-To change settings later without reinstalling, edit `appsettings.json` and restart the service.
+To change settings later, re-run the configurator, or edit `appsettings.json` and restart the service.
 
 ## Transports
 
@@ -132,7 +126,7 @@ CloudPrint supports two transport modes, selected during install.
 
 ### AWS SQS
 
-The default transport. The installer auto-creates an SQS queue pair per machine/printer. Multiple printers per machine are supported — each printer gets its own queue, with a per-lane `PdfRenderDpi`/`PdfFitMode` override (top-level values are the fallback). On reinstall, all queues for the machine are deleted and recreated from the new printer list.
+The default transport. The installer auto-creates an SQS queue pair per machine/printer. Multiple printers per machine are supported — each printer gets its own queue, with a per-lane `PdfRenderDpi`/`PdfFitMode` override (top-level values are the fallback). On reconfigure, missing queues are created; existing queues are reused.
 
 ```json
 {
@@ -240,12 +234,12 @@ Name the policy `CloudPrintSQSAccess`.
 | Action | Why |
 |--------|-----|
 | `sqs:CreateQueue` | Installer auto-creates main queue + dead-letter queue per printer |
-| `sqs:DeleteQueue` | Reinstall wipes existing `cloudprint-{hostname}-*` queues before recreating |
+| `sqs:DeleteQueue` | Lets the configurator remove `cloudprint-*` queues it provisioned |
 | `sqs:TagQueue` | Stamps each queue with `Application`/`Hostname`/`PrinterName` tags for discovery |
 | `sqs:SetQueueAttributes` | Sets the redrive policy (DLQ) on existing queues |
 | `sqs:GetQueueAttributes` | Reads the DLQ ARN to wire up the redrive policy |
 | `sqs:GetQueueUrl` | Looks up the queue URL when it already exists |
-| `sqs:ListQueues` | Finds existing `cloudprint-{hostname}-*` queues on reinstall (no resource scoping for list ops) |
+| `sqs:ListQueues` | Finds existing `cloudprint-{hostname}-*` queues on reconfigure (no resource scoping for list ops) |
 | `sqs:ReceiveMessage` | Long-polls the queue for print jobs |
 | `sqs:DeleteMessage` | Removes a message after successful printing |
 | `sqs:SendMessage` | Publishes device telemetry readings to an output queue (device telemetry only) |
@@ -494,7 +488,7 @@ cloudprint list-devices
 - **URL validation**: Only HTTPS URLs are accepted; loopback and private/reserved addresses are blocked, including via DNS resolution (SSRF prevention). Applies to both inbound file downloads and outbound device webhooks.
 - **File validation**: Downloaded files are checked against magic bytes for the claimed content type
 - **File size limit**: Downloads are capped at 50MB
-- **Credential passing**: Install script passes credentials to the service binary via stdin (not visible in process listings)
+- **Credential passing**: The configurator passes credentials to the service binary via stdin (not visible in process listings)
 - **SQS IAM scoping**: AWS credentials are scoped to `cloudprint-*` SQS queues only
 
 ## Logging
@@ -510,11 +504,13 @@ Logs are written to `C:\ProgramData\CloudPrint\logs\cloudprint-YYYYMMDD.log`. Ro
 
 ## Uninstall
 
+Use **Add/Remove Programs** (Apps & features → CloudPrint → Uninstall), or run:
+
 ```powershell
-Stop-Service CloudPrint
-sc.exe delete CloudPrint
-Remove-Item "C:\Program Files\CloudPrint" -Recurse
+& "C:\Program Files\CloudPrint\CloudPrint.exe" --uninstall
 ```
+
+This stops and deletes the service, removes the Add/Remove Programs entry, and deletes `C:\Program Files\CloudPrint`. Logs and dumps under `C:\ProgramData\CloudPrint` are left behind — delete that folder manually if you don't need them. SQS queues are not deleted; remove `cloudprint-{hostname}-*` queues in the AWS console.
 
 ## Requirements
 

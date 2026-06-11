@@ -80,8 +80,6 @@ cloudprint/
 │       │   └── FileDownloader.cs      # Download file from signed/public URL
 │       └── Configuration/
 │           └── CloudPrintOptions.cs   # Strongly-typed config (queue, AWS, etc.)
-├── scripts/
-│   └── install.ps1                    # Interactive installer + service registration
 ├── .github/
 │   └── workflows/
 │       └── release.yml                # Build, publish, create GitHub Release on tag
@@ -145,7 +143,7 @@ cloudprint/
 - [ ] Validate printer name exists locally before attempting print
   - If printer not found: log error, leave message for DLQ
 
-### Phase 5: Install Script (install.ps1)
+### Phase 5: Install Script (superseded — replaced by the GUI configurator/installer, `CloudPrint-Setup.exe`)
 - [ ] Accept `-Uninstall` switch for removal
 - [ ] Download latest release zip from GitHub Releases API
 - [ ] Extract to Program Files\CloudPrint
@@ -160,9 +158,8 @@ cloudprint/
 ### Phase 6: GitHub Actions Release Pipeline
 - [ ] Trigger on tag push matching `v*`
 - [ ] Build as self-contained single-file for `win-x64`
-- [ ] Bundle service binary + install.ps1 into zip
-- [ ] Create GitHub Release with zip artifact
-- [ ] Include a standalone `install.ps1` as a separate release asset that bootstraps the full install
+- [ ] Publish the service and embed it in the configurator as a single `CloudPrint-Setup.exe`
+- [ ] Create GitHub Release with the setup exe
 
 ### Phase 7: Polish
 - [ ] Serilog rolling file sink configuration
@@ -175,9 +172,9 @@ cloudprint/
 1. **Raw print for ZPL**: No rendering/interpretation. The service is a passthrough — ZPL transformation happens upstream.
 2. **Message stays in queue on failure**: Don't delete messages that fail to print. Visibility timeout handles retry, DLQ catches persistent failures.
 3. **One queue per machine**: Queue named `cloudprint-{HOSTNAME}`. Service creates the queue on install.
-4. **Reinstall to reconfigure**: No separate config UI for MVP. Re-run install.ps1 to change settings.
+4. **Reinstall to reconfigure**: Re-run the configurator (`CloudPrint.exe`) to change settings. (Originally re-run install.ps1; the script has been replaced by the GUI.)
 5. **Self-contained publish**: No .NET runtime dependency on target machines.
-6. **One-liner install**: `irm .../install.ps1 | iex` for near-one-click experience.
+6. **One-file install**: a single `CloudPrint-Setup.exe` with the service embedded. (Originally an `irm | iex` PowerShell one-liner.)
 
 ## Configuration (appsettings.json)
 

@@ -6,8 +6,7 @@ namespace CloudPrint.Configurator.Core.Config;
 
 /// <summary>
 /// Reads and writes the service's appsettings.json. On write it emits the full file
-/// ({ CloudPrint, Serilog }) with the Serilog block derived from <see cref="CloudPrintConfig.DumpPayloads"/>,
-/// mirroring what scripts/install.ps1 produces today.
+/// ({ CloudPrint, Serilog }) with the Serilog block derived from <see cref="CloudPrintConfig.DumpPayloads"/>.
 /// </summary>
 public static class ConfigStore
 {

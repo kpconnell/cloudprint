@@ -22,7 +22,7 @@ public class QueueNamingTests
     [Fact]
     public void Sanitizes_and_lowercases_and_trims_trailing_hyphens()
     {
-        // Each non-alphanumeric char maps to its own '-' (matches install.ps1's -replace), then trims trailing.
+        // Each non-alphanumeric char maps to its own '-', then trailing hyphens are trimmed.
         Assert.Equal("cloudprint-host-a-b-c",
             QueueNaming.ForPrinter("HOST", "A_b c--"));
     }

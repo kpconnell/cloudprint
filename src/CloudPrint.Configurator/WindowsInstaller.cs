@@ -5,7 +5,7 @@ namespace CloudPrint.Configurator;
 
 /// <summary>
 /// Windows-only install actions: create runtime directories, write + lock down the config file,
-/// and register/restart the service. Mirrors what scripts/install.ps1 does, but driven from the GUI.
+/// and register/restart the service.
 /// Lives in the WinForms shell (not Core) because it touches sc.exe / icacls.
 /// </summary>
 internal static class WindowsInstaller
@@ -53,7 +53,7 @@ internal static class WindowsInstaller
 
         Run("sc.exe", "description", InstallPaths.ServiceName, InstallPaths.ServiceDescription);
 
-        // Auto-restart on failure after 5s, 10s, then 30s (matches install.ps1).
+        // Auto-restart on failure after 5s, 10s, then 30s.
         Run("sc.exe", "failure", InstallPaths.ServiceName,
             "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000");
         log("Registered service with auto-restart policy.");

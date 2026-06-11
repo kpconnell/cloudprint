@@ -37,8 +37,8 @@ public sealed class ServiceExeException : Exception
 
 /// <summary>
 /// Drives the CloudPrint.Service.exe CLI subcommands (verify-creds, create-queue, list-queues,
-/// delete-queue, list-devices). Credentials are passed via stdin JSON exactly as scripts/install.ps1
-/// does, so they never appear in a process argument list.
+/// delete-queue, list-devices). Credentials are passed via stdin JSON so they never appear in a
+/// process argument list.
 /// </summary>
 public sealed class ServiceExeClient
 {

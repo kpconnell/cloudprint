@@ -1,6 +1,6 @@
 namespace CloudPrint.Configurator.Core.Config;
 
-/// <summary>The AWS regions offered during configuration (mirrors scripts/install.ps1).</summary>
+/// <summary>The AWS regions offered during configuration.</summary>
 public sealed record AwsRegion(string Id, string Name);
 
 public static class AwsRegions
