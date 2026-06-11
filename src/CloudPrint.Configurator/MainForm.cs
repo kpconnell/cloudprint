@@ -285,7 +285,7 @@ internal sealed class MainForm : Form
     {
         _printerList.Items.Clear();
         foreach (var l in _printers)
-            _printerList.Items.Add($"{l.PrinterName}   ({l.PdfRenderDpi ?? ConfigDefaults.DefaultPdfRenderDpi} DPI, {l.PdfFitMode ?? ConfigDefaults.DefaultPdfFitMode})");
+            _printerList.Items.Add($"{l.PrinterName}   ({l.PdfRenderDpi ?? ConfigDefaults.DefaultPdfRenderDpi} DPI, {l.PdfFitMode ?? ConfigDefaults.DefaultPdfFitMode}{(l.PdfMonochrome == true ? ", B/W" : "")})");
     }
 
     // ---- Devices ----
@@ -440,6 +440,7 @@ internal sealed class MainForm : Form
             Transport = _rbHttp.Checked ? ConfigDefaults.TransportHttp : ConfigDefaults.TransportSqs,
             PdfRenderDpi = ConfigDefaults.DefaultPdfRenderDpi,
             PdfFitMode = ConfigDefaults.DefaultPdfFitMode,
+            PdfMonochrome = ConfigDefaults.DefaultPdfMonochrome,
             DumpPayloads = _dump.Checked,
             DumpPath = InstallPaths.DumpPathWindows,
             Station = string.IsNullOrWhiteSpace(_station.Text) ? null : _station.Text.Trim(),

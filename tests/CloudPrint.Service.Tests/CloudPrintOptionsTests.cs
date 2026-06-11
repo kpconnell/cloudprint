@@ -95,6 +95,40 @@ public class CloudPrintOptionsTests
     }
 
     [Fact]
+    public void Lane_monochrome_overrides_global_and_inherits_when_unset()
+    {
+        var options = new CloudPrintOptions
+        {
+            PdfMonochrome = false,
+            Printers =
+            {
+                new PrinterLane { PrinterName = "Thermal", QueueUrl = "https://q1", PdfMonochrome = true },
+                new PrinterLane { PrinterName = "Laser", QueueUrl = "https://q2" }
+            }
+        };
+
+        var lanes = options.ResolvedSqsLanes();
+
+        Assert.True(lanes[0].PdfMonochrome);
+        Assert.False(lanes[1].PdfMonochrome); // inherited from global default
+    }
+
+    [Fact]
+    public void Global_monochrome_applies_to_lanes_without_override()
+    {
+        var options = new CloudPrintOptions
+        {
+            PdfMonochrome = true,
+            Printers =
+            {
+                new PrinterLane { PrinterName = "Thermal", QueueUrl = "https://q" }
+            }
+        };
+
+        Assert.True(options.ResolvedSqsLanes()[0].PdfMonochrome);
+    }
+
+    [Fact]
     public void Legacy_single_printer_config_promotes_to_one_lane()
     {
         var options = new CloudPrintOptions
@@ -199,7 +233,7 @@ public class CloudPrintOptionsTests
             "PdfRenderDpi": 300,
             "PdfFitMode": "Margins",
             "Printers": [
-              { "PrinterName": "Zebra_ZP500", "QueueUrl": "https://q1", "PdfRenderDpi": 203, "PdfFitMode": "PhysicalPage" },
+              { "PrinterName": "Zebra_ZP500", "QueueUrl": "https://q1", "PdfRenderDpi": 203, "PdfFitMode": "PhysicalPage", "PdfMonochrome": true },
               { "PrinterName": "HP_LaserJet", "QueueUrl": "https://q2" }
             ]
           }
@@ -219,10 +253,12 @@ public class CloudPrintOptionsTests
         Assert.Equal("Zebra_ZP500", lanes[0].PrinterName);
         Assert.Equal(203, lanes[0].PdfRenderDpi);
         Assert.Equal("PhysicalPage", lanes[0].PdfFitMode);
+        Assert.True(lanes[0].PdfMonochrome);
 
         Assert.Equal("HP_LaserJet", lanes[1].PrinterName);
-        Assert.Equal(300, lanes[1].PdfRenderDpi);    // inherited from global
+        Assert.Equal(300, lanes[1].PdfRenderDpi);     // inherited from global
         Assert.Equal("Margins", lanes[1].PdfFitMode); // inherited from global
+        Assert.False(lanes[1].PdfMonochrome);         // inherited from global default
     }
 
     [Fact]

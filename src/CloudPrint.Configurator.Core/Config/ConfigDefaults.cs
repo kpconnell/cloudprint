@@ -41,9 +41,17 @@ public static class ConfigDefaults
     public const string FitPhysicalPage = "PhysicalPage";
     public static readonly IReadOnlyList<string> FitModes = new[] { FitMargins, FitPhysicalPage };
 
+    // Common printer resolutions offered in the editor; the field stays editable
+    // for anything else. Matching the printer's native DPI avoids a quality-killing
+    // resample between rasterization and the driver.
+    public static readonly IReadOnlyList<int> CommonPdfRenderDpis = new[] { 203, 300, 600 };
+    public const int MinPdfRenderDpi = 72;
+    public const int MaxPdfRenderDpi = 1200;
+
     // Defaults (mirror CloudPrint.Service.Configuration.CloudPrintOptions)
     public const int DefaultPdfRenderDpi = 300;
     public const string DefaultPdfFitMode = FitMargins;
+    public const bool DefaultPdfMonochrome = false;
     public const int DefaultVisibilityTimeoutSeconds = 300;
     public const int DefaultHttpPollTimeoutSeconds = 30;
     public const int DefaultBaudRate = 9600;

@@ -43,6 +43,7 @@ public class ConfigStoreTests
                     QueueUrl = "https://q/1",
                     PdfRenderDpi = 203,
                     PdfFitMode = "PhysicalPage",
+                    PdfMonochrome = true,
                 },
             },
             Devices =
@@ -66,6 +67,7 @@ public class ConfigStoreTests
         Assert.Equal("secret+with/chars", parsed.AwsSecretAccessKey);
         var lane = Assert.Single(parsed.Printers);
         Assert.Equal(203, lane.PdfRenderDpi);
+        Assert.True(lane.PdfMonochrome);
         var device = Assert.Single(parsed.Devices);
         Assert.Equal("COM3", device.ComPort);
         Assert.Equal(new[] { "Z" }, device.InitCommands);
