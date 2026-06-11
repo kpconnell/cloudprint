@@ -70,7 +70,7 @@ jobs:
           Copy-Item out/app/CloudPrint.Configurator.exe dist/CloudPrint-Setup.exe -Force
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CloudPrint-Setup
           path: dist/CloudPrint-Setup.exe
