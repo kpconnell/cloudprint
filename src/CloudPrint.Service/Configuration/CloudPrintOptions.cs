@@ -29,8 +29,11 @@ public class CloudPrintOptions
     public string PrinterName { get; set; } = string.Empty;
 
     // PDF printing — global defaults; lanes may override individually.
+    // PdfRenderDpi should match the printer's native resolution (e.g. 203 for
+    // direct thermal) so the rasterized page maps 1:1 onto device dots.
     public int PdfRenderDpi { get; set; } = 300;
     public string PdfFitMode { get; set; } = "Margins";
+    public bool PdfMonochrome { get; set; } = false;
 
     // Debug
     public bool DumpPayloads { get; set; } = false;
@@ -63,7 +66,8 @@ public class CloudPrintOptions
         PrinterName: lane.PrinterName,
         QueueUrl: lane.QueueUrl,
         PdfRenderDpi: lane.PdfRenderDpi is > 0 ? lane.PdfRenderDpi.Value : PdfRenderDpi,
-        PdfFitMode: !string.IsNullOrWhiteSpace(lane.PdfFitMode) ? lane.PdfFitMode! : PdfFitMode);
+        PdfFitMode: !string.IsNullOrWhiteSpace(lane.PdfFitMode) ? lane.PdfFitMode! : PdfFitMode,
+        PdfMonochrome: lane.PdfMonochrome ?? PdfMonochrome);
 
     /// <summary>
     /// Resolves configured devices with global defaults applied. Entries without a Name are skipped.
@@ -112,9 +116,11 @@ public class PrinterLane
     public string QueueUrl { get; set; } = string.Empty;
     public int? PdfRenderDpi { get; set; }
     public string? PdfFitMode { get; set; }
+    public bool? PdfMonochrome { get; set; }
 }
 
-public record ResolvedLane(string PrinterName, string QueueUrl, int PdfRenderDpi, string PdfFitMode);
+public record ResolvedLane(
+    string PrinterName, string QueueUrl, int PdfRenderDpi, string PdfFitMode, bool PdfMonochrome = false);
 
 /// <summary>Raw device configuration as bound from appsettings.json.</summary>
 public class DeviceConfig

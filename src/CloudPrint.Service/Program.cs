@@ -231,7 +231,8 @@ static void RegisterHttpTransport(HostApplicationBuilder builder, CloudPrintOpti
         PrinterName: options.PrinterName,
         QueueUrl: string.Empty,
         PdfRenderDpi: options.PdfRenderDpi,
-        PdfFitMode: options.PdfFitMode);
+        PdfFitMode: options.PdfFitMode,
+        PdfMonochrome: options.PdfMonochrome);
 
     builder.Services.AddHttpClient<HttpApiJobSource>();
     builder.Services.AddSingleton<IJobSource>(sp => sp.GetRequiredService<HttpApiJobSource>());

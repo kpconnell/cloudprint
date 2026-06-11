@@ -27,7 +27,7 @@ public class JobProcessor : IJobProcessor
         _fileDownloader = fileDownloader;
         _printRouter = printRouter;
         _logger = logger;
-        _pdfSettings = new PdfRenderSettings(lane.PdfRenderDpi, lane.PdfFitMode);
+        _pdfSettings = new PdfRenderSettings(lane.PdfRenderDpi, lane.PdfFitMode, lane.PdfMonochrome);
     }
 
     private static readonly HashSet<string> TextContentTypes = new(StringComparer.OrdinalIgnoreCase)

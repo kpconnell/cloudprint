@@ -377,7 +377,7 @@ public class JobProcessorTests
     public async Task Pdf_print_uses_per_lane_render_settings()
     {
         var pdfContent = "%PDF-1.4\n%EOF";
-        var thermalLane = new ResolvedLane("ZebraThermal", "https://q", PdfRenderDpi: 203, PdfFitMode: "PhysicalPage");
+        var thermalLane = new ResolvedLane("ZebraThermal", "https://q", PdfRenderDpi: 203, PdfFitMode: "PhysicalPage", PdfMonochrome: true);
         var processor = CreateProcessor(pdfContent, lane: thermalLane);
         var job = new PrintJobMessage
         {
@@ -390,7 +390,7 @@ public class JobProcessorTests
         _pdfPrinter.Verify(p => p.Print(
             It.IsAny<string>(),
             "ZebraThermal",
-            It.Is<PdfRenderSettings>(s => s.Dpi == 203 && s.FitMode == "PhysicalPage")), Times.Once);
+            It.Is<PdfRenderSettings>(s => s.Dpi == 203 && s.FitMode == "PhysicalPage" && s.Monochrome)), Times.Once);
     }
 
     [Fact]
@@ -410,7 +410,7 @@ public class JobProcessorTests
         _pdfPrinter.Verify(p => p.Print(
             It.IsAny<string>(),
             "HP_LaserJet",
-            It.Is<PdfRenderSettings>(s => s.Dpi == 300 && s.FitMode == "Margins")), Times.Once);
+            It.Is<PdfRenderSettings>(s => s.Dpi == 300 && s.FitMode == "Margins" && !s.Monochrome)), Times.Once);
     }
 
     private class MockHttpHandler : HttpMessageHandler

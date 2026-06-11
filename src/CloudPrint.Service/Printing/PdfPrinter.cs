@@ -1,10 +1,12 @@
 #if WINDOWS
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Printing;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Docnet.Core;
+using Docnet.Core.Converters;
 using Docnet.Core.Models;
 
 namespace CloudPrint.Service.Printing;
@@ -52,11 +54,18 @@ public class PdfPrinter : IPdfPrinter
                 using var pageReader = pdfDoc.GetPageReader(i);
                 var w = pageReader.GetPageWidth();
                 var h = pageReader.GetPageHeight();
-                var rawBytes = pageReader.GetImage(); // BGRA
+                // Flatten onto white: PDFium leaves unpainted areas transparent, and
+                // print drivers handle alpha unpredictably (dithered/haloed edges).
+                var rawBytes = pageReader.GetImage(new NaiveTransparencyRemover()); // BGRA, opaque
 
-                var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                if (settings.Monochrome)
+                    ThresholdToBlackAndWhite(rawBytes);
+
+                // Format32bppRgb: same BGRA memory layout, but the driver never
+                // sees an alpha channel.
+                var bmp = new Bitmap(w, h, PixelFormat.Format32bppRgb);
                 var data = bmp.LockBits(new Rectangle(0, 0, w, h),
-                    ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                    ImageLockMode.WriteOnly, PixelFormat.Format32bppRgb);
                 try { Marshal.Copy(rawBytes, 0, data.Scan0, rawBytes.Length); }
                 finally { bmp.UnlockBits(data); }
                 pages.Add(bmp);
@@ -74,7 +83,26 @@ public class PdfPrinter : IPdfPrinter
             {
                 if (e.Graphics is null) return;
                 var page = pages[pageIndex];
-                var dest = fitToPhysicalPage ? e.PageBounds : e.MarginBounds;
+
+                Rectangle dest;
+                if (fitToPhysicalPage)
+                {
+                    // The print Graphics origin sits at the top-left of the printable
+                    // area; shift back by the hard margins so the bitmap aligns to the
+                    // physical sheet instead of drifting down-right.
+                    dest = e.PageBounds;
+                    dest.Offset((int)-e.PageSettings.HardMarginX, (int)-e.PageSettings.HardMarginY);
+                }
+                else
+                {
+                    dest = e.MarginBounds;
+                }
+
+                // When render DPI matches the device this is ~1:1; for any residual
+                // scaling, avoid GDI+'s low-quality default resampler.
+                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
+
                 var scale = Math.Min(
                     (float)dest.Width / page.Width,
                     (float)dest.Height / page.Height);
@@ -92,6 +120,21 @@ public class PdfPrinter : IPdfPrinter
         finally
         {
             foreach (var bmp in pages) bmp.Dispose();
+        }
+    }
+
+    // Snap every pixel to pure black or white (Rec. 601 luma, 50% threshold).
+    // Thermal heads are 1-bit; doing the threshold here keeps output deterministic
+    // instead of leaving anti-aliased grays to the driver's dither.
+    private static void ThresholdToBlackAndWhite(byte[] bgra)
+    {
+        for (var i = 0; i < bgra.Length; i += 4)
+        {
+            var luma = (bgra[i + 2] * 299 + bgra[i + 1] * 587 + bgra[i] * 114) / 1000;
+            var v = luma < 128 ? (byte)0 : (byte)255;
+            bgra[i] = v;
+            bgra[i + 1] = v;
+            bgra[i + 2] = v;
         }
     }
 
