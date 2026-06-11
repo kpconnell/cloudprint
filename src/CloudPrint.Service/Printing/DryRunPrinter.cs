@@ -26,7 +26,8 @@ public class DryRunPrinter : IRawPrinter, IDocumentPrinter, IPdfPrinter
     void IPdfPrinter.Print(string filePath, string printerName, PdfRenderSettings settings)
     {
         var fileSize = new FileInfo(filePath).Length;
-        _logger.LogInformation("[DRY RUN] Would print PDF ({Bytes} bytes, {Dpi} DPI, {FitMode}, monochrome={Monochrome}) to printer '{Printer}'",
-            fileSize, settings.Dpi, settings.FitMode, settings.Monochrome, printerName);
+        _logger.LogInformation("[DRY RUN] Would print PDF ({Bytes} bytes, {Dpi} DPI, {FitMode}, monochrome={Monochrome}, paper={Paper}) to printer '{Printer}'",
+            fileSize, settings.Dpi, settings.FitMode, settings.Monochrome,
+            string.IsNullOrEmpty(settings.PaperSize) ? "driver default" : settings.PaperSize, printerName);
     }
 }

@@ -24,6 +24,17 @@ if (args.Length < 3)
     return 1;
 }
 
+// PNG input: just emit the text zoom for comparison against other renderers.
+if (args[0].EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+{
+    var png = Image.Load<Bgra32>(Path.GetFullPath(args[0]));
+    var dir = Path.GetFullPath(args.Length > 3 ? args[3] : "out");
+    Directory.CreateDirectory(dir);
+    SaveTextZoom(png, Path.GetFileNameWithoutExtension(args[0]), dir);
+    Console.WriteLine($"text zoom written to {dir}");
+    return 0;
+}
+
 var pdfPath = Path.GetFullPath(args[0]);
 var renderDpi = int.Parse(args[1]);
 var deviceDpi = int.Parse(args[2]);
@@ -65,6 +76,34 @@ SaveTextZoom(thermal2, "stage2_thermal", outDir);
 SaveTextZoom(thermal3, "stage3_thermal", outDir);
 SaveTextZoom(stage2, "stage2_gray", outDir);
 SaveTextZoom(stage3, "stage3_gray", outDir);
+
+// ---- Render-quality A/B at device DPI: flags and threshold variants ----
+foreach (var (name, flags) in new (string, Docnet.Core.Models.RenderFlags)[]
+{
+    ("printing", Docnet.Core.Models.RenderFlags.RenderForPrinting),
+    ("lcd", Docnet.Core.Models.RenderFlags.OptimizeTextForLcd),
+    ("grayscale", Docnet.Core.Models.RenderFlags.Grayscale),
+})
+{
+    try
+    {
+        using var doc = DocLib.Instance.GetDocReader(pdfPath, new PageDimensions(deviceDpi / 72.0));
+        using var page = doc.GetPageReader(0);
+        var img = Image.LoadPixelData<Bgra32>(
+            page.GetImage(new NaiveTransparencyRemover(), flags), page.GetPageWidth(), page.GetPageHeight());
+        var bw = img.Clone(ctx => ctx.BinaryThreshold(0.5f));
+        SaveTextZoom(bw, $"flag_{name}", outDir);
+        img.Dispose(); bw.Dispose();
+    }
+    catch (Exception ex) { Console.WriteLine($"flag {name}: {ex.Message}"); }
+}
+// Threshold variants on the plain render (bolder text keeps more AA edge pixels)
+foreach (var t in new[] { 0.5f, 0.63f, 0.75f })
+{
+    var bw = stage3.Clone(ctx => ctx.BinaryThreshold(t));
+    SaveTextZoom(bw, $"thresh_{(int)(t * 100)}", outDir);
+    bw.Dispose();
+}
 
 // Bar-width fidelity: scan a row through the first barcode and report black
 // run lengths. Uneven widths after thresholding = scannability risk.

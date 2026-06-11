@@ -79,6 +79,10 @@ public class PdfPrinter : IPdfPrinter
             doc.PrinterSettings.PrinterName = printerName;
             doc.DocumentName = Path.GetFileName(filePath);
 
+            var paper = ResolvePaperSize(doc.PrinterSettings, settings.PaperSize, _logger);
+            if (paper is not null)
+                doc.DefaultPageSettings.PaperSize = paper;
+
             doc.PrintPage += (_, e) =>
             {
                 if (e.Graphics is null) return;
@@ -106,8 +110,29 @@ public class PdfPrinter : IPdfPrinter
                 var scale = Math.Min(
                     (float)dest.Width / page.Width,
                     (float)dest.Height / page.Height);
+
+                if (pageIndex == 0)
+                {
+                    // One line per job describing what the driver actually gave us —
+                    // paper/DPI mismatches are invisible without this.
+                    _logger.LogInformation(
+                        "Print geometry for {Printer}: paper={Paper} ({Pw}x{Ph}/100\"), driver={DriverDpi}dpi, " +
+                        "renderDpi={RenderDpi}, fit={FitMode}, pageBounds={PageBounds}, marginBounds={MarginBounds}, " +
+                        "hardMargins=({Hx},{Hy}), bitmap={Bw}x{Bh}px, scale={Scale:0.###}",
+                        printerName, e.PageSettings.PaperSize.PaperName,
+                        e.PageSettings.PaperSize.Width, e.PageSettings.PaperSize.Height,
+                        e.PageSettings.PrinterResolution.X, settings.Dpi, settings.FitMode,
+                        e.PageBounds, e.MarginBounds,
+                        e.PageSettings.HardMarginX, e.PageSettings.HardMarginY,
+                        page.Width, page.Height, scale);
+                }
+
+                // Round, don't truncate: when the bitmap exactly matches the page
+                // (render DPI == device DPI), float error must not shave a unit off
+                // the dest rect and force a full-bitmap resample.
                 e.Graphics.DrawImage(page,
-                    new Rectangle(dest.X, dest.Y, (int)(page.Width * scale), (int)(page.Height * scale)),
+                    new Rectangle(dest.X, dest.Y,
+                        (int)Math.Round(page.Width * scale), (int)Math.Round(page.Height * scale)),
                     new Rectangle(0, 0, page.Width, page.Height),
                     GraphicsUnit.Pixel);
                 pageIndex++;
@@ -123,15 +148,52 @@ public class PdfPrinter : IPdfPrinter
         }
     }
 
-    // Snap every pixel to pure black or white (Rec. 601 luma, 50% threshold).
-    // Thermal heads are 1-bit; doing the threshold here keeps output deterministic
-    // instead of leaving anti-aliased grays to the driver's dither.
+    // Maps the configured stock ("4x6", "2x2", "Letter", "A4", or any "WxH" in
+    // inches) to a PaperSize. Prefers the driver's own stock entry with matching
+    // dimensions; falls back to a custom size. Null = leave the queue default.
+    private static PaperSize? ResolvePaperSize(PrinterSettings printer, string configured, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(configured)) return null;
+
+        int w, h;
+        switch (configured.Trim().ToLowerInvariant())
+        {
+            case "letter": w = 850; h = 1100; break;
+            case "a4": w = 827; h = 1169; break;
+            default:
+                var parts = configured.Trim().ToLowerInvariant().Split('x');
+                if (parts.Length == 2
+                    && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out var wi)
+                    && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var hi)
+                    && wi > 0 && hi > 0)
+                {
+                    w = (int)Math.Round(wi * 100);
+                    h = (int)Math.Round(hi * 100);
+                }
+                else
+                {
+                    logger.LogWarning("Unrecognized PdfPaperSize '{Size}' — using the queue's default paper", configured);
+                    return null;
+                }
+                break;
+        }
+
+        foreach (PaperSize ps in printer.PaperSizes)
+            if (Math.Abs(ps.Width - w) <= 5 && Math.Abs(ps.Height - h) <= 5)
+                return ps;
+        return new PaperSize($"CloudPrint {configured}", w, h);
+    }
+
+    // Snap every pixel to pure black or white (Rec. 601 luma). Thermal heads are
+    // 1-bit; doing the threshold here keeps output deterministic instead of leaving
+    // anti-aliased grays to the driver's dither. 63% (not 50%) keeps more of the
+    // anti-aliasing edge pixels, giving small glyphs fuller strokes at 203 dpi.
     private static void ThresholdToBlackAndWhite(byte[] bgra)
     {
         for (var i = 0; i < bgra.Length; i += 4)
         {
             var luma = (bgra[i + 2] * 299 + bgra[i + 1] * 587 + bgra[i] * 114) / 1000;
-            var v = luma < 128 ? (byte)0 : (byte)255;
+            var v = luma < 160 ? (byte)0 : (byte)255;
             bgra[i] = v;
             bgra[i + 1] = v;
             bgra[i + 2] = v;

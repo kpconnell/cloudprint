@@ -12,6 +12,7 @@ internal sealed class PrinterEditorForm : Form
 {
     private readonly ComboBox _printer = new();
     private readonly ComboBox _dpi = new();
+    private readonly ComboBox _paper = new();
     private readonly ComboBox _fit = new();
     private readonly CheckBox _mono = new()
     {
@@ -30,7 +31,7 @@ internal sealed class PrinterEditorForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(440, 236);
+        ClientSize = new Size(440, 250);
 
         Controls.Add(new Label { Text = "Printer", Left = 16, Top = 20, Width = 80 });
         _printer.SetBounds(130, 16, 290, 24);
@@ -55,8 +56,25 @@ internal sealed class PrinterEditorForm : Form
             ForeColor = SystemColors.GrayText,
         });
 
-        Controls.Add(new Label { Text = "PDF fit mode", Left = 16, Top = 88, Width = 100 });
-        _fit.SetBounds(130, 84, 200, 24);
+        Controls.Add(new Label { Text = "Paper / label size", Left = 16, Top = 88, Width = 110 });
+        _paper.SetBounds(130, 84, 100, 24);
+        _paper.DropDownStyle = ComboBoxStyle.DropDownList;
+        _paper.Items.Add(ConfigDefaults.PaperDriverDefaultLabel);
+        foreach (var p in ConfigDefaults.PaperSizes)
+            _paper.Items.Add(p);
+        var paper = Lane.PdfPaperSize;
+        _paper.SelectedItem = paper is not null && ConfigDefaults.PaperSizes.Contains(paper)
+            ? paper : ConfigDefaults.PaperDriverDefaultLabel;
+        Controls.Add(_paper);
+        Controls.Add(new Label
+        {
+            Text = "Stock loaded in the printer (labels: 4x6)",
+            Left = 240, Top = 88, Width = 190,
+            ForeColor = SystemColors.GrayText,
+        });
+
+        Controls.Add(new Label { Text = "PDF fit mode", Left = 16, Top = 120, Width = 100 });
+        _fit.SetBounds(130, 116, 200, 24);
         _fit.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var f in ConfigDefaults.FitModes)
             _fit.Items.Add(f);
@@ -64,12 +82,12 @@ internal sealed class PrinterEditorForm : Form
         _fit.SelectedItem = fit is not null && ConfigDefaults.FitModes.Contains(fit) ? fit : ConfigDefaults.DefaultPdfFitMode;
         Controls.Add(_fit);
 
-        _mono.Location = new Point(130, 120);
+        _mono.Location = new Point(130, 152);
         _mono.Checked = Lane.PdfMonochrome ?? ConfigDefaults.DefaultPdfMonochrome;
         Controls.Add(_mono);
 
-        var ok = new Button { Text = "OK", Left = 250, Top = 186, Width = 80 };
-        var cancel = new Button { Text = "Cancel", Left = 340, Top = 186, Width = 80, DialogResult = DialogResult.Cancel };
+        var ok = new Button { Text = "OK", Left = 250, Top = 200, Width = 80 };
+        var cancel = new Button { Text = "Cancel", Left = 340, Top = 200, Width = 80, DialogResult = DialogResult.Cancel };
         ok.Click += (_, _) => OnOk();
         Controls.Add(ok);
         Controls.Add(cancel);
@@ -95,6 +113,7 @@ internal sealed class PrinterEditorForm : Form
             return;
         }
 
+        var selectedPaper = (string)_paper.SelectedItem!;
         Lane = new PrinterLaneModel
         {
             PrinterName = _printer.Text.Trim(),
@@ -102,6 +121,8 @@ internal sealed class PrinterEditorForm : Form
             PdfRenderDpi = dpi,
             PdfFitMode = (string)_fit.SelectedItem!,
             PdfMonochrome = _mono.Checked,
+            PdfPaperSize = selectedPaper == ConfigDefaults.PaperDriverDefaultLabel
+                ? ConfigDefaults.PaperDriverDefault : selectedPaper,
         };
         DialogResult = DialogResult.OK;
     }

@@ -285,7 +285,7 @@ internal sealed class MainForm : Form
     {
         _printerList.Items.Clear();
         foreach (var l in _printers)
-            _printerList.Items.Add($"{l.PrinterName}   ({l.PdfRenderDpi ?? ConfigDefaults.DefaultPdfRenderDpi} DPI, {l.PdfFitMode ?? ConfigDefaults.DefaultPdfFitMode}{(l.PdfMonochrome == true ? ", B/W" : "")})");
+            _printerList.Items.Add($"{l.PrinterName}   ({l.PdfRenderDpi ?? ConfigDefaults.DefaultPdfRenderDpi} DPI, {l.PdfFitMode ?? ConfigDefaults.DefaultPdfFitMode}{(string.IsNullOrEmpty(l.PdfPaperSize) ? "" : $", {l.PdfPaperSize}")}{(l.PdfMonochrome == true ? ", B/W" : "")})");
     }
 
     // ---- Devices ----
