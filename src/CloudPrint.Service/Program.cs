@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Amazon;
 using Amazon.SecurityToken;
@@ -152,6 +153,8 @@ try
     RegisterDeviceForwarding(builder, cloudPrintOptions, dryRun);
 
     var host = builder.Build();
+    // Logged after Build() so it reaches the configured file sink, not just the bootstrap console.
+    Log.Information("CloudPrint service starting — version {Version}", ServiceVersion());
     host.Run();
     return 0;
 }
@@ -164,6 +167,14 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+// Version stamped by CI (-p:Version from the release tag); default 1.0.0 in dev builds.
+static string ServiceVersion() =>
+    Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+        .InformationalVersion.Split('+')[0]
+    ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)
+    ?? "unknown";
 
 // --- DI registration helpers ---
 

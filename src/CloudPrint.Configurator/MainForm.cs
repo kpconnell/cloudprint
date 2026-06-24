@@ -45,7 +45,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "CloudPrint — Station Setup";
+        Text = $"CloudPrint — Station Setup — v{AppVersion.Display}";
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(720, 860);
         MinimumSize = new Size(740, 700);
@@ -173,6 +173,16 @@ internal sealed class MainForm : Form
         _log.SetBounds(16, y, 686, 120);
         Controls.Add(_log);
         y += 130;
+
+        Controls.Add(new Label
+        {
+            Text = $"CloudPrint v{AppVersion.Display}",
+            Left = 16,
+            Top = y,
+            AutoSize = true,
+            ForeColor = Color.DimGray,
+        });
+        y += 24;
     }
 
     private static void AddListButtons(

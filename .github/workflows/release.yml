@@ -22,6 +22,11 @@ jobs:
       - name: Test
         run: dotnet test --verbosity normal
 
+      # Stamp the assemblies with the release tag (v2.3.0 -> 2.3.0) so the configurator UI,
+      # Add/Remove Programs, and the service startup log all show the real version.
+      - name: Derive version from tag
+        run: echo "VERSION=$('${{ github.ref_name }}'.TrimStart('v'))" >> $env:GITHUB_ENV
+
       # Build the one-file installer: publish the service, embed it into the configurator,
       # then publish the configurator as a single self-contained exe.
       - name: Publish service
@@ -29,6 +34,7 @@ jobs:
           dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj `
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version=${{ env.VERSION }} `
             -o out/service
 
       - name: Embed service into configurator
@@ -40,6 +46,7 @@ jobs:
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:EnableCompressionInSingleFile=true `
+            -p:Version=${{ env.VERSION }} `
             -o out/app
 
       - name: Stage installer

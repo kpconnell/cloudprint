@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using CloudPrint.Configurator.Core.Config;
 
 namespace CloudPrint.Configurator;
@@ -54,9 +53,8 @@ internal static class SelfInstaller
 
     private static void WriteArpEntry(string installedExe)
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
         AddReg("DisplayName", "REG_SZ", "CloudPrint");
-        AddReg("DisplayVersion", "REG_SZ", version);
+        AddReg("DisplayVersion", "REG_SZ", AppVersion.Display);
         AddReg("Publisher", "REG_SZ", "CloudPrint");
         AddReg("InstallLocation", "REG_SZ", InstallPaths.InstallDir);
         AddReg("DisplayIcon", "REG_SZ", installedExe);
