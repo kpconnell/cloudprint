@@ -616,64 +616,81 @@ static async Task<int> CreateQueue(string queueName, Dictionary<string, string>?
         using var sqsClient = new AmazonSQSClient(
             accessKey, secretKey, RegionEndpoint.GetBySystemName(region));
 
-        // Create DLQ first
+        var queueTags = tags ?? new Dictionary<string, string>();
+
+        // Tags are applied separately (via TagQueue below) rather than passed into
+        // CreateQueue. SQS rejects CreateQueue when a queue of the same name already
+        // exists with different tags ("a queue already exists with the same name and
+        // different tags"), so provisioning must not depend on tags matching at create
+        // time. TagQueue is additive and never fails on an existing queue.
+
+        // Create the DLQ first, reusing it if it already exists.
         var dlqName = $"{queueName}-dlq";
-        var dlqResponse = await sqsClient.CreateQueueAsync(new CreateQueueRequest
-        {
-            QueueName = dlqName,
-            Tags = tags ?? new Dictionary<string, string>()
-        });
+        var dlqUrl = await EnsureQueue(dlqName, attributes: null);
 
         // Get DLQ ARN
         var dlqAttributes = await sqsClient.GetQueueAttributesAsync(new GetQueueAttributesRequest
         {
-            QueueUrl = dlqResponse.QueueUrl,
+            QueueUrl = dlqUrl,
             AttributeNames = ["QueueArn"]
         });
         var dlqArn = dlqAttributes.Attributes["QueueArn"];
 
-        // Create or update main queue with redrive policy
-        string queueUrl;
-        try
+        // Create the main queue with its redrive policy, reusing it if it already exists.
+        var queueUrl = await EnsureQueue(queueName, new Dictionary<string, string>
         {
-            var response = await sqsClient.CreateQueueAsync(new CreateQueueRequest
-            {
-                QueueName = queueName,
-                Attributes = new Dictionary<string, string>
-                {
-                    ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
-                },
-                Tags = tags ?? new Dictionary<string, string>()
-            });
-            queueUrl = response.QueueUrl;
-        }
-        catch (AmazonSQSException ex) when (ex.ErrorCode == "QueueAlreadyExists")
-        {
-            var urlResponse = await sqsClient.GetQueueUrlAsync(queueName);
-            queueUrl = urlResponse.QueueUrl;
+            ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
+        });
 
-            await sqsClient.SetQueueAttributesAsync(new SetQueueAttributesRequest
-            {
-                QueueUrl = queueUrl,
-                Attributes = new Dictionary<string, string>
-                {
-                    ["RedrivePolicy"] = JsonSerializer.Serialize(new { deadLetterTargetArn = dlqArn, maxReceiveCount = 5 })
-                }
-            });
-
-            // Apply tags to the existing queue (additive — doesn't remove other tags)
-            if (tags is { Count: > 0 })
-            {
-                await sqsClient.TagQueueAsync(new TagQueueRequest
-                {
-                    QueueUrl = queueUrl,
-                    Tags = tags
-                });
-            }
-        }
+        // Apply tags additively to both queues — safe whether they were just created or
+        // already existed (TagQueue overwrites matching keys and adds new ones).
+        await TagIfAny(dlqUrl);
+        await TagIfAny(queueUrl);
 
         Console.WriteLine(queueUrl);
         return 0;
+
+        // Creates the named queue with the given attributes, or reuses an existing queue
+        // and brings its attributes in line. Tags are handled separately by TagIfAny so a
+        // tag mismatch on an existing queue can't fail provisioning.
+        async Task<string> EnsureQueue(string name, Dictionary<string, string>? attributes)
+        {
+            try
+            {
+                var response = await sqsClient.CreateQueueAsync(new CreateQueueRequest
+                {
+                    QueueName = name,
+                    Attributes = attributes ?? new Dictionary<string, string>()
+                });
+                return response.QueueUrl;
+            }
+            catch (QueueNameExistsException)
+            {
+                // Same name, different attributes — reuse the queue and update its attributes.
+                var url = (await sqsClient.GetQueueUrlAsync(name)).QueueUrl;
+                if (attributes is { Count: > 0 })
+                {
+                    await sqsClient.SetQueueAttributesAsync(new SetQueueAttributesRequest
+                    {
+                        QueueUrl = url,
+                        Attributes = attributes
+                    });
+                }
+                return url;
+            }
+        }
+
+        async Task TagIfAny(string url)
+        {
+            if (queueTags.Count > 0)
+            {
+                await sqsClient.TagQueueAsync(new TagQueueRequest
+                {
+                    QueueUrl = url,
+                    Tags = queueTags
+                });
+            }
+        }
     }
     catch (Exception ex)
     {
