@@ -81,6 +81,7 @@ internal sealed class MainForm : Form
         _region.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var r in AwsRegions.All)
             _region.Items.Add($"{r.Id} — {r.Name}");
+        SelectRegion(AwsRegions.DefaultId);
         group.Controls.Add(_region);
 
         group.Controls.Add(new Label { Text = "Access Key ID", Left = 16, Top = 120, Width = 110 });
@@ -238,7 +239,7 @@ internal sealed class MainForm : Form
     private string SelectedRegionId()
     {
         if (_region.SelectedItem is not string s || s.Length == 0)
-            return AwsRegions.All[0].Id;
+            return AwsRegions.DefaultId;
         var space = s.IndexOf(' ');
         return space > 0 ? s[..space] : s;
     }
@@ -622,7 +623,7 @@ internal sealed class MainForm : Form
         _rbHttp.Checked = existing.Transport == ConfigDefaults.TransportHttp;
         _rbSqs.Checked = !_rbHttp.Checked;
 
-        SelectRegion(existing.Region ?? AwsRegions.All[0].Id);
+        SelectRegion(existing.Region ?? AwsRegions.DefaultId);
         _accessKey.Text = existing.AwsAccessKeyId ?? string.Empty;
         _secretKey.Text = existing.AwsSecretAccessKey ?? string.Empty;
 

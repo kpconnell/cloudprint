@@ -11,4 +11,8 @@
     <InternalsVisibleTo Include="CloudPrint.Configurator.Core.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.Core" Version="4.0.9.4" />
+  </ItemGroup>
+
 </Project>
