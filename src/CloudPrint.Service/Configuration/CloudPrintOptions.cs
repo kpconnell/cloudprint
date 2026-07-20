@@ -32,7 +32,7 @@ public class CloudPrintOptions
     // PdfRenderDpi should match the printer's native resolution (e.g. 203 for
     // direct thermal) so the rasterized page maps 1:1 onto device dots.
     public int PdfRenderDpi { get; set; } = 300;
-    public string PdfFitMode { get; set; } = "Margins";
+    public string PdfFitMode { get; set; } = "PhysicalPage";
     public bool PdfMonochrome { get; set; } = false;
     // Stock loaded in the printer ("4x6", "2x2", "Letter", "A4", or "WxH" inches).
     // Empty = the Windows queue's driver default paper.

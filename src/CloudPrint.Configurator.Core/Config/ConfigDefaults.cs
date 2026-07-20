@@ -56,7 +56,7 @@ public static class ConfigDefaults
 
     // Defaults (mirror CloudPrint.Service.Configuration.CloudPrintOptions)
     public const int DefaultPdfRenderDpi = 300;
-    public const string DefaultPdfFitMode = FitMargins;
+    public const string DefaultPdfFitMode = FitPhysicalPage;
     public const bool DefaultPdfMonochrome = false;
     public const string DefaultPdfPaperSize = PaperDriverDefault;
     public const int DefaultVisibilityTimeoutSeconds = 300;

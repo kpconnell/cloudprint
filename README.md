@@ -114,11 +114,11 @@ PDFs are rasterized to a bitmap, then sent through the Windows printing pipeline
 | Setting | Default | Notes |
 |---|---|---|
 | `PdfRenderDpi` | `300` | Rasterization resolution. `203` for thermal label printers, `300` for office, `600` for high-fidelity reports. Higher DPI = more memory per page. |
-| `PdfFitMode` | `Margins` | `Margins` fits within the driver-reported page margins (office printers). `PhysicalPage` prints edge-to-edge ignoring margins (thermal/label printers). |
+| `PdfFitMode` | `PhysicalPage` | `PhysicalPage` prints edge-to-edge ignoring margins (thermal/label printers). `Margins` fits within the driver-reported page margins (office printers). |
 
 **Per-printer overrides (SQS):** Each entry in `Printers[]` may set its own `PdfRenderDpi` / `PdfFitMode`. When a lane omits a value, it falls back to the top-level default. This lets a thermal label printer (`203` / `PhysicalPage`) and an office laser (`300` / `Margins`) coexist on the same machine. The configurator exposes these per printer.
 
-To change settings later, re-run the configurator, or edit `appsettings.json` and restart the service.
+To change settings later, re-run the configurator, or edit `appsettings.json` and restart the service. See [docs/SETTINGS.md](docs/SETTINGS.md) for the full settings reference and PowerShell one-liners for editing the installed config.
 
 ## Transports
 

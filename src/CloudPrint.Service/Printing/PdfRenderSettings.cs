@@ -6,5 +6,5 @@ namespace CloudPrint.Service.Printing;
 // "A4", or any "WxH" in inches); empty = the queue's driver default.
 public record PdfRenderSettings(int Dpi, string FitMode, bool Monochrome = false, string PaperSize = "")
 {
-    public static readonly PdfRenderSettings Default = new(300, "Margins");
+    public static readonly PdfRenderSettings Default = new(300, "PhysicalPage");
 }
