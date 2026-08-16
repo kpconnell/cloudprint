@@ -25,8 +25,10 @@ jobs:
       - name: Render screenshots
         run: |
           $exe = Get-ChildItem -Recurse -Path src/CloudPrint.Configurator/bin/Release -Filter CloudPrint.Configurator.exe | Select-Object -First 1
-          & $exe.FullName --screenshot out/screenshots
+          # WinExe: '&' would return immediately, so wait for the process and surface its exit code.
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--screenshot', (Join-Path $PWD 'out/screenshots') -Wait -PassThru
           Get-Content out/screenshots/screenshots.log
+          exit $p.ExitCode
 
       - name: Upload screenshots
         if: always()

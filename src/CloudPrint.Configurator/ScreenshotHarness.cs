@@ -83,17 +83,41 @@ internal static class ScreenshotHarness
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(0, 0);
         form.ShowInTaskbar = false;
-        if (fullHeight is { } h)
-            form.ClientSize = new Size(form.ClientSize.Width, h); // un-scrolled: capture the whole dialog
+        var wanted = fullHeight ?? form.ClientSize.Height;
+        // Windows clamps a top-level window to the screen; on a small runner screen the dialog scrolls.
+        // Ask for the full height, then stitch scrolled tiles into one tall image if we didn't get it.
+        form.ClientSize = new Size(form.ClientSize.Width, wanted);
         form.Show();
         Application.DoEvents();
         Thread.Sleep(150);
         Application.DoEvents();
 
-        using var bmp = new Bitmap(form.ClientSize.Width, form.ClientSize.Height);
-        form.DrawToBitmap(bmp, form.ClientRectangle);
-        bmp.Save(path, ImageFormat.Png);
-        log.Add($"{Path.GetFileName(path)}: {bmp.Width}x{bmp.Height}");
+        var visibleH = form.ClientSize.Height;
+        var width = form.ClientSize.Width;
+        var totalH = Math.Max(wanted, visibleH);
+        using var full = new Bitmap(width, totalH);
+        using (var g = Graphics.FromImage(full))
+            g.Clear(form.BackColor);
+
+        var offset = 0;
+        while (true)
+        {
+            form.AutoScrollPosition = new Point(0, offset);
+            Application.DoEvents();
+            Thread.Sleep(50);
+            Application.DoEvents();
+            var actual = -form.AutoScrollPosition.Y;
+            using var tile = new Bitmap(width, visibleH);
+            form.DrawToBitmap(tile, new Rectangle(0, 0, width, visibleH));
+            using (var g = Graphics.FromImage(full))
+                g.DrawImage(tile, 0, actual);
+            if (actual + visibleH >= totalH || actual < offset) break; // reached the end (or can't scroll further)
+            offset = actual + visibleH - 8; // small overlap so nothing falls between tiles
+            if (offset >= totalH) break;
+        }
+
+        full.Save(path, ImageFormat.Png);
+        log.Add($"{Path.GetFileName(path)}: {full.Width}x{full.Height} (visible {visibleH})");
         form.Hide();
     }
 
