@@ -27,7 +27,7 @@ internal sealed partial class DeviceEditorForm : Form
 
     // Slot A: connection (one of three groups visible)
     private const int SlotTop = 116;
-    private const int SlotHeight = 190;
+    private const int SlotHeight = 204;
     private readonly GroupBox _serialGroup = new() { Text = "Serial connection (RS-232 / USB virtual COM)", Left = 12, Top = SlotTop, Width = 560, Height = SlotHeight };
     private readonly ComboBox _comPort = new();
     private readonly ComboBox _baud = new();
@@ -36,13 +36,13 @@ internal sealed partial class DeviceEditorForm : Form
     private readonly ComboBox _stopBits = new();
     private readonly CheckBox _dtr = new() { Text = "Assert DTR", AutoSize = true };
     private readonly CheckBox _rts = new() { Text = "Assert RTS", AutoSize = true };
-    private readonly Label _serialHint = new() { Left = 16, Top = 158, Width = 530, ForeColor = Color.DimGray };
+    private readonly Label _serialHint = new() { Left = 16, Top = 176, Width = 530, ForeColor = Color.DimGray };
 
     private readonly GroupBox _hidGroup = new() { Text = "USB HID device", Left = 12, Top = SlotTop, Width = 560, Height = SlotHeight };
     private readonly ComboBox _hidPick = new();
     private readonly NumericUpDown _vid = new();
     private readonly NumericUpDown _pid = new();
-    private readonly Label _hidHint = new() { Left = 16, Top = 130, Width = 530, Height = 44, ForeColor = Color.DimGray };
+    private readonly Label _hidHint = new() { Left = 16, Top = 136, Width = 530, Height = 60, ForeColor = Color.DimGray };
 
     private readonly GroupBox _tcpGroup = new() { Text = "Network device (TCP — the device listens, e.g. Cubiscan :1050)", Left = 12, Top = SlotTop, Width = 560, Height = SlotHeight };
     private readonly TextBox _host = new();
@@ -51,7 +51,8 @@ internal sealed partial class DeviceEditorForm : Form
 
     // Stream group: framing + commands, shared by serial and TCP
     private const int StreamTop = SlotTop + SlotHeight + 10;
-    private readonly GroupBox _streamGroup = new() { Text = "Data framing & commands", Left = 12, Top = StreamTop, Width = 560, Height = 262 };
+    private const int StreamHeight = 282;
+    private readonly GroupBox _streamGroup = new() { Text = "Data framing && commands", Left = 12, Top = StreamTop, Width = 560, Height = StreamHeight };
     private readonly ComboBox _frameMode = new();
     private readonly ComboBox _lineEnding = new();
     private readonly TextBox _frameStart = new();
@@ -64,10 +65,10 @@ internal sealed partial class DeviceEditorForm : Form
     private readonly ComboBox _protocol = new();
     private readonly Label _patternLabel = new();
     private readonly TextBox _pattern = new();
-    private readonly Label _streamHint = new() { Left = 16, Top = 236, Width = 530, ForeColor = Color.DimGray };
+    private readonly Label _streamHint = new() { Left = 16, Top = 236, Width = 530, Height = 40, ForeColor = Color.DimGray };
 
     // Behaviour
-    private const int BehaviourTop = StreamTop + 262 + 12;
+    private const int BehaviourTop = StreamTop + StreamHeight + 12;
     private readonly ComboBox _pollMode = new();
     private readonly NumericUpDown _pollInterval = new();
     private readonly CheckBox _stableOnly = new() { Text = "Only publish stable readings", AutoSize = true };
@@ -78,7 +79,7 @@ internal sealed partial class DeviceEditorForm : Form
     private const int OutputTop = BehaviourTop + 96;
     private readonly GroupBox _outputGroup = new() { Text = "Where readings go", Left = 12, Top = OutputTop, Width = 560, Height = 150 };
     private readonly ComboBox _outTransport = new();
-    private readonly Label _outSqsHint = new() { Text = "Sent to the cloud (an SQS queue is created automatically).", Left = 16, Top = 56, Width = 520, ForeColor = Color.DimGray };
+    private readonly Label _outSqsHint = new() { Text = "Sent to the cloud (SQS queue auto-created).", Left = 306, Top = 26, Width = 245, ForeColor = Color.DimGray };
     private readonly TextBox _webhookUrl = new();
     private readonly TextBox _headerName = new();
     private readonly TextBox _headerValue = new();
@@ -166,7 +167,7 @@ internal sealed partial class DeviceEditorForm : Form
         Controls.Add(new Label
         {
             Text = "raw = forward every frame verbatim (start here for discovery); scale = also try to parse a weight.",
-            Left = 200, Top = 86, Width = 380, ForeColor = Color.DimGray
+            Left = 200, Top = 80, Width = 385, Height = 34, ForeColor = Color.DimGray
         });
     }
 
@@ -191,7 +192,7 @@ internal sealed partial class DeviceEditorForm : Form
         MarkAdvanced(stopLabel, _stopBits);
 
         _dtr.Location = new Point(334, 88);
-        _rts.Location = new Point(334, 118);
+        _rts.Location = new Point(334, 114);
         _serialGroup.Controls.Add(_dtr);
         _serialGroup.Controls.Add(_rts);
         MarkAdvanced(_dtr, _rts);

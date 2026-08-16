@@ -38,7 +38,7 @@ internal static class ScreenshotHarness
             if (samplePath is not null)
                 File.Copy(samplePath, InstallContext.ConfigPath, overwrite: true);
             using var main = new MainForm();
-            Capture(main, Path.Combine(outDir, "01-main.png"), fullHeight: null, log);
+            Capture(main, Path.Combine(outDir, "01-main.png"), fullHeight: main.ClientSize.Height, log);
         }
         catch (Exception ex) { log.Add($"main: FAILED {ex}"); }
 
@@ -107,10 +107,13 @@ internal static class ScreenshotHarness
             Thread.Sleep(50);
             Application.DoEvents();
             var actual = -form.AutoScrollPosition.Y;
-            using var tile = new Bitmap(width, visibleH);
-            form.DrawToBitmap(tile, new Rectangle(0, 0, width, visibleH));
+            // Form.DrawToBitmap renders the whole window (caption + borders); crop to the client area.
+            using var window = new Bitmap(form.Width, form.Height);
+            form.DrawToBitmap(window, new Rectangle(0, 0, form.Width, form.Height));
+            var clientOrigin = form.PointToScreen(Point.Empty);
+            var clientRect = new Rectangle(clientOrigin.X - form.Left, clientOrigin.Y - form.Top, width, visibleH);
             using (var g = Graphics.FromImage(full))
-                g.DrawImage(tile, 0, actual);
+                g.DrawImage(window, new Rectangle(0, actual, width, visibleH), clientRect, GraphicsUnit.Pixel);
             if (actual + visibleH >= totalH || actual < offset) break; // reached the end (or can't scroll further)
             offset = actual + visibleH - 8; // small overlap so nothing falls between tiles
             if (offset >= totalH) break;

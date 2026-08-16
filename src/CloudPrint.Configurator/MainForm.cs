@@ -138,7 +138,7 @@ internal sealed class MainForm : Form
 
     private void BuildDevices(ref int y)
     {
-        var group = new GroupBox { Text = "Scales & devices (optional)", Left = 12, Top = y, Width = 690, Height = 210 };
+        var group = new GroupBox { Text = "Scales && devices (optional)", Left = 12, Top = y, Width = 690, Height = 210 };
 
         group.Controls.Add(new Label { Text = "Station name", Left = 16, Top = 28, Width = 90 });
         _station.SetBounds(110, 24, 220, 24);
