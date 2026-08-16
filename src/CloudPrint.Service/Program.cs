@@ -7,6 +7,7 @@ using Amazon.SQS;
 using Amazon.SQS.Model;
 using CloudPrint.Service.Configuration;
 using CloudPrint.Service.Devices;
+using CloudPrint.Service.Devices.Commands;
 using CloudPrint.Service.Devices.Readers;
 using CloudPrint.Service.FileHandling;
 using CloudPrint.Service.Printing;
@@ -275,8 +276,15 @@ static void RegisterDeviceForwarding(HostApplicationBuilder builder, CloudPrintO
     Log.Information("CloudPrint configured for {Count} device(s): {Devices}",
         devices.Count, string.Join(", ", devices.Select(d => $"{d.Type}/{d.Name}")));
 
-    // The simulated reader is always available (non-Windows / dry-run); real readers are Windows-only.
+    // The simulated reader is always available (dry-run, or Windows-only device types off Windows).
+    // TCP readers are cross-platform and run for real everywhere unless --dry-run was given.
     builder.Services.AddSingleton<IDeviceReaderFactory, SimulatedDeviceReaderFactory>();
+    var explicitDryRun = dryRun && OperatingSystem.IsWindows() || Environment.GetCommandLineArgs().Contains("--dry-run");
+    if (!explicitDryRun)
+    {
+        builder.Services.AddSingleton<IDeviceReaderFactory, TcpScaleReaderFactory>();
+        builder.Services.AddSingleton<IDeviceReaderFactory, RawTcpReaderFactory>();
+    }
 #if WINDOWS
     if (!dryRun)
     {
@@ -287,17 +295,16 @@ static void RegisterDeviceForwarding(HostApplicationBuilder builder, CloudPrintO
     }
 #endif
     builder.Services.AddSingleton<DeviceReaderRegistry>();
-    builder.Services.AddHttpClient();
+    builder.Services.AddSingleton<DeviceCommandRouter>();
 
     // A device may publish to SQS even when the print transport is HTTP, so ensure the SQS client
-    // is registered. Idempotent — RegisterSqsLanes may already have added it.
-    if (devices.Any(d => d.Output.Transport == "sqs"))
-    {
-        builder.Services.TryAddSingleton<IAmazonSQS>(_ => new AmazonSQSClient(
-            options.AwsAccessKeyId,
-            options.AwsSecretAccessKey,
-            RegionEndpoint.GetBySystemName(options.Region)));
-    }
+    // is registered whenever any device output (or the command queue) needs it.
+    var needsSqs = devices.Any(d => d.Output.Transport == "sqs") || !string.IsNullOrWhiteSpace(options.DeviceCommandQueueUrl);
+    if (needsSqs)
+        EnsureSqsClient(builder, options);
+
+    builder.Services.AddHttpClient();
+    builder.Services.AddHttpClient("device-readings");
 
     foreach (var device in devices)
     {
@@ -305,23 +312,46 @@ static void RegisterDeviceForwarding(HostApplicationBuilder builder, CloudPrintO
         builder.Services.AddSingleton<IHostedService>(sp =>
         {
             var registry = sp.GetRequiredService<DeviceReaderRegistry>();
-            var effective = dryRun ? captured with { Type = "simulated" } : captured;
+            // Off Windows (or in dry-run) the Windows-only types fall back to the simulator; TCP stays real unless --dry-run.
+            var simulate = explicitDryRun || (!OperatingSystem.IsWindows() && !captured.IsTcp);
+            var effective = simulate ? captured with { Type = "simulated" } : captured;
             var reader = registry.Create(effective, sp);
 
-            IReadingPublisher publisher = dryRun
+            // Simulated devices never publish for real (keeps macOS/dry-run runs from polluting live queues).
+            IReadingPublisher publisher = simulate
                 ? new DryRunReadingPublisher(sp.GetRequiredService<ILogger<DryRunReadingPublisher>>())
                 : CreateReadingPublisher(captured.Output, sp);
 
-            return new DeviceForwardingService(
+            var service = new DeviceForwardingService(
                 reader,
                 publisher,
-                captured.Station,
-                captured.StableOnly,
-                $"device/{captured.Name}",
+                captured,
                 sp.GetRequiredService<ILogger<DeviceForwardingService>>());
+            sp.GetRequiredService<DeviceCommandRouter>().Register(service);
+            return service;
         });
     }
+
+    // Cloud → device commands: one SQS queue per station, routed to devices by name.
+    if (!string.IsNullOrWhiteSpace(options.DeviceCommandQueueUrl) && !explicitDryRun)
+    {
+        builder.Services.AddSingleton<IHostedService>(sp => new DeviceCommandPollingService(
+            new SqsDeviceCommandSource(
+                sp.GetRequiredService<IAmazonSQS>(),
+                options.DeviceCommandQueueUrl,
+                sp.GetRequiredService<ILogger<SqsDeviceCommandSource>>()),
+            sp.GetRequiredService<DeviceCommandRouter>(),
+            sp.GetRequiredService<ILogger<DeviceCommandPollingService>>()));
+        Log.Information("CloudPrint device command queue: {Queue}", options.DeviceCommandQueueUrl);
+    }
 }
+
+// Idempotent — RegisterSqsLanes may already have added the client.
+static void EnsureSqsClient(HostApplicationBuilder builder, CloudPrintOptions options) =>
+    builder.Services.TryAddSingleton<IAmazonSQS>(_ => new AmazonSQSClient(
+        options.AwsAccessKeyId,
+        options.AwsSecretAccessKey,
+        RegionEndpoint.GetBySystemName(options.Region)));
 
 static IReadingPublisher CreateReadingPublisher(ResolvedOutput output, IServiceProvider sp) => output.Transport switch
 {
@@ -371,6 +401,8 @@ static async Task<int> PreviewDevice()
     var services = new ServiceCollection();
     services.AddLogging(); // no provider added => silent, keeps stdout clean for readings
     services.AddSingleton<IDeviceReaderFactory, SimulatedDeviceReaderFactory>();
+    services.AddSingleton<IDeviceReaderFactory, TcpScaleReaderFactory>();
+    services.AddSingleton<IDeviceReaderFactory, RawTcpReaderFactory>();
 #if WINDOWS
     services.AddSingleton<IDeviceReaderFactory, SerialScaleReaderFactory>();
     services.AddSingleton<IDeviceReaderFactory, RawSerialReaderFactory>();
@@ -404,6 +436,17 @@ static async Task<int> PreviewDevice()
             return 1;
         }
 
+        // First line: what we connected to (HID product/usages/descriptor, COM identity, TCP endpoint).
+        Console.WriteLine(JsonSerializer.Serialize(new DeviceReading
+        {
+            DeviceId = reader.DeviceId,
+            DeviceType = reader.DeviceType,
+            Source = reader.Source,
+            Status = "connected",
+            Metadata = reader.Metadata is null ? null : new Dictionary<string, string>(reader.Metadata)
+        }));
+        await Console.Out.FlushAsync();
+
         while (!cts.IsCancellationRequested)
         {
             DeviceReading? reading;
@@ -423,6 +466,9 @@ static async Task<int> PreviewDevice()
 
             if (reading is not null)
             {
+                reading.DeviceId = reader.DeviceId;
+                reading.DeviceType = reader.DeviceType;
+                reading.Source = reader.Source;
                 Console.WriteLine(JsonSerializer.Serialize(reading));
                 await Console.Out.FlushAsync();
             }
@@ -570,20 +616,37 @@ static async Task<int> TestOutput()
 
 static int ListDevices()
 {
+    var json = Environment.GetCommandLineArgs().Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
 #if WINDOWS
+    var inventory = DeviceInventory.Collect();
+    if (json)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(inventory, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
     Console.WriteLine("Serial ports:");
-    foreach (var name in System.IO.Ports.SerialPort.GetPortNames().OrderBy(n => n))
-        Console.WriteLine($"  {name}");
+    foreach (var port in inventory.SerialPorts)
+        Console.WriteLine($"  {port.Name}");
 
     Console.WriteLine("HID devices:");
-    foreach (var hid in HidSharp.DeviceList.Local.GetHidDevices())
-    {
-        string product;
-        try { product = hid.GetProductName(); } catch { product = "unknown"; }
-        Console.WriteLine($"  VID={hid.VendorID:X4} PID={hid.ProductID:X4} {product}");
-    }
+    foreach (var hid in inventory.HidDevices)
+        Console.WriteLine($"  VID={hid.Vid} PID={hid.Pid} {hid.Product ?? "unknown"}");
+
+    // Human-friendly detail (not parsed by the configurator, which uses --json).
+    Console.WriteLine();
+    Console.WriteLine("Detail:");
+    foreach (var port in inventory.SerialPorts)
+        Console.WriteLine($"  {port.Name}: {port.FriendlyName ?? "?"}" +
+                          (port.Vid is null ? "" : $"  VID={port.Vid} PID={port.Pid}") +
+                          (port.Serial is null ? "" : $"  serial={port.Serial}"));
+    foreach (var hid in inventory.HidDevices)
+        Console.WriteLine($"  VID={hid.Vid} PID={hid.Pid} {hid.Product ?? "?"} ({hid.Manufacturer ?? "?"})" +
+                          (hid.Serial is null ? "" : $" serial={hid.Serial}") +
+                          $" usages={hid.Usages ?? "?"}{(hid.IsScale ? " [HID scale]" : "")}");
     return 0;
 #else
+    if (json) { Console.WriteLine("{\"serialPorts\":[],\"hidDevices\":[]}"); return 0; }
     Console.Error.WriteLine("list-devices is only supported on Windows.");
     return 1;
 #endif

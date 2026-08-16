@@ -70,23 +70,62 @@ public class ServiceExeClientTests
     }
 
     [Fact]
-    public async Task ListDevices_parses_serial_and_hid()
+    public async Task ListDevices_parses_legacy_text_output()
     {
+        // An older service exe ignores --json and prints the text form; the client must still cope.
         const string stdout = "Serial ports:\n  COM3\n  COM5\nHID devices:\n  VID=0922 PID=8003 Mettler Toledo\n";
         var runner = new FakeProcessRunner().Enqueue(0, stdout);
         var client = new ServiceExeClient(runner, "svc.exe");
 
         var inv = await client.ListDevicesAsync();
 
-        Assert.Equal(new[] { "COM3", "COM5" }, inv.SerialPorts);
+        Assert.Equal(new[] { "COM3", "COM5" }, inv.SerialPorts.Select(p => p.Name));
         var hid = Assert.Single(inv.HidDevices);
         Assert.Equal(0x0922, hid.Vid);
         Assert.Equal(0x8003, hid.Pid);
         Assert.Equal("Mettler Toledo", hid.Product);
 
         var call = Assert.Single(runner.Calls);
-        Assert.Equal(new[] { "list-devices" }, call.Args);
+        Assert.Equal(new[] { "list-devices", "--json" }, call.Args);
         Assert.Null(call.Stdin); // no credentials on stdin
+    }
+
+    [Fact]
+    public async Task ListDevices_parses_json_output_with_identity()
+    {
+        const string stdout = """
+            {
+              "serialPorts": [
+                { "name": "COM5", "friendlyName": "USB Serial Port (COM5)", "vid": "0403", "pid": "6001", "serial": "A50285BI", "enumerator": "FTDIBUS" },
+                { "name": "COM1", "friendlyName": "Communications Port (COM1)" }
+              ],
+              "hidDevices": [
+                { "vid": "0B67", "pid": "555E", "product": "Fairbanks Scales SCB-R9000", "manufacturer": "Fairbanks", "serial": null, "usages": "008D:0020", "isScale": true },
+                { "vid": "046D", "pid": "C31C", "product": "USB Keyboard", "usages": "0001:0006", "isScale": false }
+              ]
+            }
+            """;
+        var runner = new FakeProcessRunner().Enqueue(0, stdout);
+        var client = new ServiceExeClient(runner, "svc.exe");
+
+        var inv = await client.ListDevicesAsync();
+
+        Assert.Equal(2, inv.SerialPorts.Count);
+        var ftdi = inv.SerialPorts[0];
+        Assert.Equal("COM5", ftdi.Name);
+        Assert.Equal(0x0403, ftdi.Vid);
+        Assert.Equal(0x6001, ftdi.Pid);
+        Assert.Equal("A50285BI", ftdi.Serial);
+        Assert.Contains("USB Serial Port", ftdi.Describe());
+        Assert.Contains("VID=0403", ftdi.Describe());
+        Assert.Equal("COM1  —  Communications Port (COM1)", inv.SerialPorts[1].Describe());
+
+        Assert.Equal(2, inv.HidDevices.Count);
+        var scale = inv.HidDevices[0];
+        Assert.Equal(0x0B67, scale.Vid);
+        Assert.True(scale.IsScale);
+        Assert.Equal("008D:0020", scale.Usages);
+        Assert.False(inv.HidDevices[1].IsScale);
     }
 
     [Fact]

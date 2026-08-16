@@ -34,6 +34,7 @@ internal sealed class MainForm : Form
 
     // Devices
     private readonly TextBox _station = new();
+    private string? _existingCommandQueueUrl; // preserved across edits; (re)created at install when SQS devices exist
     private readonly ListBox _deviceList = new();
     private List<DeviceModel> _devices = new();
 
@@ -457,6 +458,7 @@ internal sealed class MainForm : Form
             Station = string.IsNullOrWhiteSpace(_station.Text) ? null : _station.Text.Trim(),
             DevicePollIntervalMs = ConfigDefaults.DefaultDevicePollIntervalMs,
             DeviceStableOnly = ConfigDefaults.DefaultDeviceStableOnly,
+            DeviceCommandQueueUrl = _existingCommandQueueUrl,
             Devices = _devices,
         };
 
@@ -583,6 +585,21 @@ internal sealed class MainForm : Form
             });
             Log("  " + device.Output.QueueUrl);
         }
+
+        // Cloud → device commands share one queue per station (only when SQS is in play for devices).
+        if (config.Devices.Count > 0 && (config.Transport == ConfigDefaults.TransportSqs
+                                         || config.Devices.Any(d => d.Output?.Transport == ConfigDefaults.TransportSqs)))
+        {
+            var queueName = QueueNaming.ForDeviceCommands(station);
+            Log($"Creating device command queue {queueName}…");
+            config.DeviceCommandQueueUrl = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
+            {
+                ["Application"] = "cloudprint",
+                ["Station"] = station,
+                ["Purpose"] = "device-commands",
+            });
+            Log("  " + config.DeviceCommandQueueUrl);
+        }
     }
 
     private void SetBusy(bool busy)
@@ -634,6 +651,7 @@ internal sealed class MainForm : Form
 
         _station.Text = existing.Station ?? string.Empty;
         _dump.Checked = existing.DumpPayloads;
+        _existingCommandQueueUrl = existing.DeviceCommandQueueUrl;
 
         _printers = existing.Printers.Count > 0
             ? existing.Printers

@@ -46,9 +46,16 @@ public class DeviceReading
     [JsonPropertyName("stable")]
     public bool Stable { get; set; }
 
-    /// <summary>ok | motion | overload | underload | zero | error</summary>
+    /// <summary>
+    /// Measurement: ok | motion | overload | underload | zero | error.
+    /// Lifecycle events (value is null): connected | disconnected | stale | command-sent | command-failed.
+    /// </summary>
     [JsonPropertyName("status")]
     public string Status { get; set; } = "ok";
+
+    /// <summary>True for lifecycle/discovery events (connected, disconnected, stale, command-sent...) as opposed to measurements.</summary>
+    [JsonIgnore]
+    public bool IsEvent => Status is "connected" or "disconnected" or "stale" or "command-sent" or "command-failed";
 
     /// <summary>Dimensioner output. Null for scales (reserved for future device types).</summary>
     [JsonPropertyName("dimensions")]
@@ -57,6 +64,10 @@ public class DeviceReading
     /// <summary>The exact ASCII line or hex report the device emitted, for passthrough and debugging.</summary>
     [JsonPropertyName("raw")]
     public string? Raw { get; set; }
+
+    /// <summary>The exact frame bytes as hex (lossless, including control characters and bytes the text decoding cannot represent).</summary>
+    [JsonPropertyName("rawHex")]
+    public string? RawHex { get; set; }
 
     [JsonPropertyName("metadata")]
     public Dictionary<string, string>? Metadata { get; set; }
@@ -79,6 +90,12 @@ public class ReadingSource
 
     [JsonPropertyName("product")]
     public string? Product { get; set; } // HID product string, when available
+
+    [JsonPropertyName("host")]
+    public string? Host { get; set; } // tcp host
+
+    [JsonPropertyName("tcpPort")]
+    public int? TcpPort { get; set; } // tcp port
 }
 
 /// <summary>Dimensioner output. Defined now; populated when a dimensioner reader is added.</summary>

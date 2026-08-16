@@ -16,16 +16,27 @@ public static class ConfigDefaults
     public const string DeviceHidScale = "hid-scale";
     public const string DeviceSerialRaw = "serial-raw";
     public const string DeviceHidRaw = "hid-raw";
+    public const string DeviceTcpScale = "tcp-scale";
+    public const string DeviceTcpRaw = "tcp-raw";
     public static readonly IReadOnlyList<string> DeviceTypes =
-        new[] { DeviceSerialScale, DeviceHidScale, DeviceSerialRaw, DeviceHidRaw };
+        new[] { DeviceSerialRaw, DeviceSerialScale, DeviceHidRaw, DeviceHidScale, DeviceTcpRaw, DeviceTcpScale };
 
     public static bool IsSerial(string type) => type is DeviceSerialScale or DeviceSerialRaw;
     public static bool IsHid(string type) => type is DeviceHidScale or DeviceHidRaw;
+    public static bool IsTcp(string type) => type is DeviceTcpScale or DeviceTcpRaw;
+    /// <summary>Serial and TCP share the byte-stream settings (framing, request/init commands, terminator, encoding).</summary>
+    public static bool IsStream(string type) => IsSerial(type) || IsTcp(type);
 
-    // Serial line endings, parities, encodings
+    // Serial line endings, parities, encodings, framing
     public static readonly IReadOnlyList<string> LineEndings = new[] { "crlf", "lf", "cr", "literal" };
     public static readonly IReadOnlyList<string> Parities = new[] { "None", "Even", "Odd" };
-    public static readonly IReadOnlyList<string> Encodings = new[] { "ascii", "utf8" };
+    public static readonly IReadOnlyList<string> Encodings = new[] { "ascii", "utf8", "latin1" };
+    public static readonly IReadOnlyList<string> FrameModes = new[] { "line", "delimited", "idle" };
+    public const string DefaultFrameMode = "line";
+    public const int DefaultIdleGapMs = 150;
+    public const int DefaultTcpPort = 1050;              // Cubiscan's default; iDimension is user-set
+    public const string CommandTerminatorDefaultLabel = "(same as line ending)";
+    public const string CommandTerminatorNone = "none";
     public static readonly IReadOnlyList<int> BaudRates = new[] { 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
     public static readonly IReadOnlyList<int> DataBitsOptions = new[] { 7, 8 };
     public static readonly IReadOnlyList<int> StopBitsOptions = new[] { 1, 2 };
@@ -71,4 +82,8 @@ public static class ConfigDefaults
     public const string DefaultPollMode = "stream";
     public const int DefaultDevicePollIntervalMs = 500;
     public const bool DefaultDeviceStableOnly = true;
+    public const int DefaultDeviceHeartbeatSeconds = 0;
+    public const int DefaultDeviceStaleAfterSeconds = 0;
+    /// <summary>New serial/TCP devices start as raw passthrough: the frame reaches the cloud verbatim and nothing is guessed.</summary>
+    public const string DefaultDeviceType = DeviceSerialRaw;
 }

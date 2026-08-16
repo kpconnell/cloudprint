@@ -20,6 +20,9 @@ public static partial class QueueNaming
     /// <summary>Queue name for an outbound device on a given station.</summary>
     public static string ForDevice(string station, string deviceName) => Build(station, deviceName);
 
+    /// <summary>Queue name for the station's inbound device-command queue (cloud → devices).</summary>
+    public static string ForDeviceCommands(string station) => Build(station, "device-commands");
+
     /// <summary>The matching dead-letter queue name.</summary>
     public static string DeadLetter(string queueName) => $"{queueName}-dlq";
 

@@ -23,11 +23,20 @@ public sealed record OutputTestRequest
 }
 
 /// <summary>A HID device discovered by the "list-devices" subcommand.</summary>
-public sealed record HidDeviceInfo(int Vid, int Pid, string Product);
+public sealed record HidDeviceInfo(int Vid, int Pid, string Product,
+    string? Manufacturer = null, string? Serial = null, string? Usages = null, bool IsScale = false);
+
+/// <summary>A COM port discovered by the "list-devices" subcommand, with the USB identity behind it when known.</summary>
+public sealed record SerialPortInfo(string Name, string? FriendlyName = null, int? Vid = null, int? Pid = null, string? Serial = null)
+{
+    public string Describe() =>
+        FriendlyName is null && Vid is null ? Name
+        : $"{Name}  —  {FriendlyName ?? "serial"}{(Vid is null ? "" : $" (VID={Vid:X4} PID={Pid:X4})")}";
+}
 
 /// <summary>Hardware enumerated by the "list-devices" subcommand.</summary>
 public sealed record DeviceInventory(
-    IReadOnlyList<string> SerialPorts, IReadOnlyList<HidDeviceInfo> HidDevices);
+    IReadOnlyList<SerialPortInfo> SerialPorts, IReadOnlyList<HidDeviceInfo> HidDevices);
 
 /// <summary>Thrown when a service exe subcommand exits non-zero.</summary>
 public sealed class ServiceExeException : Exception
@@ -114,10 +123,47 @@ public sealed class ServiceExeClient
     /// <summary>Enumerates serial ports and HID devices on this machine (Windows-only subcommand).</summary>
     public async Task<DeviceInventory> ListDevicesAsync(CancellationToken ct = default)
     {
-        var result = await _runner.RunAsync(_exePath, new[] { "list-devices" }, stdin: null, ct);
+        var result = await _runner.RunAsync(_exePath, new[] { "list-devices", "--json" }, stdin: null, ct);
         if (result.ExitCode != 0)
             throw new ServiceExeException(Describe("list-devices", result));
-        return ParseDeviceInventory(result.StdOut);
+        return result.StdOut.TrimStart().StartsWith('{')
+            ? ParseDeviceInventoryJson(result.StdOut)
+            : ParseDeviceInventory(result.StdOut); // older service exe without --json
+    }
+
+    /// <summary>Parses the JSON of "list-devices --json" (see CloudPrint.Service.Devices.DeviceInventory).</summary>
+    internal static DeviceInventory ParseDeviceInventoryJson(string json)
+    {
+        var serial = new List<SerialPortInfo>();
+        var hid = new List<HidDeviceInfo>();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("serialPorts", out var ports) && ports.ValueKind == JsonValueKind.Array)
+            foreach (var p in ports.EnumerateArray())
+            {
+                var name = Str(p, "name");
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                serial.Add(new SerialPortInfo(name!, Str(p, "friendlyName"), Hex(p, "vid"), Hex(p, "pid"), Str(p, "serial")));
+            }
+
+        if (root.TryGetProperty("hidDevices", out var hids) && hids.ValueKind == JsonValueKind.Array)
+            foreach (var h in hids.EnumerateArray())
+            {
+                var vid = Hex(h, "vid");
+                var pid = Hex(h, "pid");
+                if (vid is null || pid is null) continue;
+                var isScale = h.TryGetProperty("isScale", out var sc) && sc.ValueKind == JsonValueKind.True;
+                hid.Add(new HidDeviceInfo(vid.Value, pid.Value, Str(h, "product") ?? string.Empty,
+                    Str(h, "manufacturer"), Str(h, "serial"), Str(h, "usages"), isScale));
+            }
+
+        return new DeviceInventory(serial, hid);
+
+        static string? Str(JsonElement e, string name) =>
+            e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        static int? Hex(JsonElement e, string name) =>
+            Str(e, name) is { } s && int.TryParse(s, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
     }
 
     private async Task<ProcessResult> Run(string command, CliInput input, CancellationToken ct)
@@ -146,9 +192,9 @@ public sealed class ServiceExeClient
     /// </summary>
     internal static DeviceInventory ParseDeviceInventory(string stdout)
     {
-        var serial = new List<string>();
+        var serial = new List<SerialPortInfo>();
         var hid = new List<HidDeviceInfo>();
-        var section = 0; // 0 = none, 1 = serial, 2 = hid
+        var section = 0; // 0 = none, 1 = serial, 2 = hid, 3 = detail (ignored)
 
         foreach (var raw in stdout.Split('\n'))
         {
@@ -158,11 +204,12 @@ public sealed class ServiceExeClient
 
             if (line.StartsWith("Serial ports", StringComparison.OrdinalIgnoreCase)) { section = 1; continue; }
             if (line.StartsWith("HID devices", StringComparison.OrdinalIgnoreCase)) { section = 2; continue; }
+            if (line.StartsWith("Detail", StringComparison.OrdinalIgnoreCase)) { section = 3; continue; }
 
             switch (section)
             {
                 case 1:
-                    serial.Add(line);
+                    serial.Add(new SerialPortInfo(line));
                     break;
                 case 2:
                     if (TryParseHid(line, out var info))

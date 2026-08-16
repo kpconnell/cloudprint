@@ -46,6 +46,9 @@ public sealed class CloudPrintConfig
     public string? Station { get; set; }
     public int? DevicePollIntervalMs { get; set; }
     public bool? DeviceStableOnly { get; set; }
+    public int? DeviceHeartbeatSeconds { get; set; }
+    public int? DeviceStaleAfterSeconds { get; set; }
+    public string? DeviceCommandQueueUrl { get; set; }        // SQS queue of cloud→device commands
     public List<DeviceModel> Devices { get; set; } = new();
 }
 
@@ -64,20 +67,36 @@ public sealed class PrinterLaneModel
 public sealed class DeviceModel
 {
     public string Name { get; set; } = string.Empty;          // unique id, used as DeviceId and log tag
-    public string Type { get; set; } = string.Empty;          // serial-scale | hid-scale | serial-raw | hid-raw
+    public string Type { get; set; } = string.Empty;          // serial-scale | serial-raw | hid-scale | hid-raw | tcp-scale | tcp-raw
     public string? Protocol { get; set; }                     // serial parser selector (default mt-sics)
     public string? Station { get; set; }                      // per-device station override
 
+    // TCP client (device is the server)
+    public string? Host { get; set; }
+    public int? Port { get; set; }
+    public int? ConnectTimeoutMs { get; set; }
+
     // Serial / USB-CDC
-    public string? ComPort { get; set; }
+    public string? ComPort { get; set; }                      // "COM3", or empty/"auto" to find by Vid/Pid
     public int? BaudRate { get; set; }
     public string? Parity { get; set; }                       // None | Even | Odd
     public int? DataBits { get; set; }
     public int? StopBits { get; set; }
-    public string? LineEnding { get; set; }                   // crlf | lf | cr | literal
-    public string? Encoding { get; set; }                     // ascii | utf8
-    public string? RequestCommand { get; set; }
+    public bool? DtrEnable { get; set; }
+    public bool? RtsEnable { get; set; }
+    public string? LineEnding { get; set; }                   // crlf | lf | cr | escaped literal
+    public string? Encoding { get; set; }                     // ascii | utf8 | latin1
+    public string? RequestCommand { get; set; }               // escapes allowed: <STX>M<ETX>, \x02
     public List<string>? InitCommands { get; set; }
+    public string? CommandTerminator { get; set; }            // null = LineEnding, "none", or escaped literal
+
+    // Framing (serial + tcp)
+    public string? FrameMode { get; set; }                    // line | delimited | idle
+    public string? FrameStart { get; set; }
+    public string? FrameEnd { get; set; }
+    public int? IdleGapMs { get; set; }
+    public int? MaxFrameBytes { get; set; }
+    public int? ReadTimeoutMs { get; set; }
 
     // HID
     public int? Vid { get; set; }
@@ -96,6 +115,8 @@ public sealed class DeviceModel
     public string? PollMode { get; set; }                     // stream | request | interval
     public int? PollIntervalMs { get; set; }
     public bool? StableOnly { get; set; }
+    public int? HeartbeatSeconds { get; set; }
+    public int? StaleAfterSeconds { get; set; }
 
     public DeviceOutputModel? Output { get; set; }
 }

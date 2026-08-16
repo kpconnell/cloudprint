@@ -21,8 +21,9 @@ public class SimulatedDeviceReader : IDeviceReader
 
     public string DeviceId => _device.Name;
     public string DeviceType => _device.Type;
-    public ReadingSource Source => new() { Connection = "simulated", Port = _device.ComPort, Vid = _device.Vid, Pid = _device.Pid };
+    public ReadingSource Source => new() { Connection = "simulated", Port = _device.ComPort, Vid = _device.Vid, Pid = _device.Pid, Host = _device.Host, TcpPort = _device.Port > 0 ? _device.Port : null };
     public bool IsConnected { get; private set; }
+    public IReadOnlyDictionary<string, string> Metadata { get; } = new Dictionary<string, string> { ["endpoint"] = "simulated" };
 
     public Task ConnectAsync(CancellationToken cancellationToken)
     {
@@ -45,8 +46,16 @@ public class SimulatedDeviceReader : IDeviceReader
             Unit = "kg",
             Stable = true,
             Status = "ok",
-            Raw = $"SIM ST {weight} kg"
+            Raw = $"SIM ST {weight} kg",
+            RawHex = Convert.ToHexString(System.Text.Encoding.ASCII.GetBytes($"SIM ST {weight} kg"))
         };
+    }
+
+    public Task SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("[device/{Name}] simulated device received {Bytes} byte(s): {Hex}",
+            _device.Name, payload.Length, Convert.ToHexString(payload.Span));
+        return Task.CompletedTask;
     }
 
     public ValueTask DisposeAsync()

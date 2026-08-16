@@ -20,7 +20,8 @@ public class SampleDriftTests
         Assert.NotNull(config);
         Assert.Equal("sqs", config!.Transport);
         Assert.Single(config.Printers);
-        Assert.Equal(3, config.Devices.Count);
+        Assert.Equal(5, config.Devices.Count);
+        Assert.Equal("https://sqs.us-east-1.amazonaws.com/123456789012/cloudprint-shipping-pc-01-device-commands", config.DeviceCommandQueueUrl);
 
         var serial = config.Devices[0];
         Assert.Equal("serial-scale", serial.Type);
@@ -39,6 +40,21 @@ public class SampleDriftTests
         var raw = config.Devices[2];
         Assert.Equal("serial-raw", raw.Type);
         Assert.False(string.IsNullOrWhiteSpace(raw.Pattern));
+
+        var tcp = config.Devices[3];
+        Assert.Equal("tcp-raw", tcp.Type);
+        Assert.Equal("10.1.100.100", tcp.Host);
+        Assert.Equal(1050, tcp.Port);
+        Assert.Equal("delimited", tcp.FrameMode);
+        Assert.Equal("<STX>", tcp.FrameStart);
+        Assert.Equal("<ETX>", tcp.FrameEnd);
+        Assert.Equal(new[] { "<STX>T<ETX>" }, tcp.InitCommands);
+
+        var auto = config.Devices[4];
+        Assert.Equal("auto", auto.ComPort);
+        Assert.Equal("idle", auto.FrameMode);
+        Assert.Equal("<CR>", auto.CommandTerminator);
+        Assert.Equal(30, auto.HeartbeatSeconds);
     }
 
     [Fact]

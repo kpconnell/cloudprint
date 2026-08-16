@@ -380,39 +380,43 @@ No client-side poll interval is needed — the long-poll timeout IS the wait.
 
 ## Device Telemetry
 
-Beyond printing, CloudPrint can read from devices physically connected to the workstation and publish their readings to the cloud. The first-class devices are **USB/serial scales**; a generic passthrough mode forwards any serial/HID device. This is opt-in: it activates only when `Devices[]` is non-empty, and runs regardless of the print `Transport`.
+Beyond printing, CloudPrint can read from devices physically or network-connected to the workstation and publish what they say to the cloud, and carry commands from the cloud back to the device. It is a **transport bridge**: every frame a device emits reaches the cloud verbatim (text + hex); parsing is an optional convenience for a few common scale formats. This is opt-in: it activates only when `Devices[]` is non-empty, and runs regardless of the print `Transport`.
 
-Each configured device runs its own background loop: connect → read → publish, with automatic reconnect (capped backoff) and de-duplication of repeated identical readings.
+Each configured device runs its own background loop: connect → read → publish, with automatic reconnect (capped backoff), de-duplication of repeated identical readings, and lifecycle events (`connected` with discovery metadata, `disconnected`, `stale`) so the cloud can see what it is talking to.
 
 ### Configuration
 
-Add a `Devices` array under `CloudPrint`. See [`samples/appsettings.sample.json`](samples/appsettings.sample.json) for a complete, multi-device example.
+Add a `Devices` array under `CloudPrint`. See [`samples/appsettings.sample.json`](samples/appsettings.sample.json) for a complete, multi-device example (HID scale, serial scale, raw serial, Cubiscan over TCP, unknown USB-serial in discovery mode).
 
 ```json
 {
   "CloudPrint": {
     "Station": "shipping-pc-01",
-    "DevicePollIntervalMs": 500,
-    "DeviceStableOnly": true,
+    "DeviceStaleAfterSeconds": 60,
+    "DeviceCommandQueueUrl": "https://sqs.us-east-1.amazonaws.com/123/cloudprint-shipping-pc-01-device-commands",
     "Devices": [
       {
         "Name": "scale-shipping",
-        "Type": "serial-scale",
-        "Protocol": "mt-sics",
+        "Type": "serial-raw",
         "ComPort": "COM3",
-        "BaudRate": 9600,
-        "LineEnding": "crlf",
-        "PollMode": "request",
-        "RequestCommand": "S",
-        "InitCommands": [ "Z" ],
+        "BaudRate": 9600, "Parity": "Even", "DataBits": 7,
+        "LineEnding": "cr",
+        "PollMode": "interval", "PollIntervalMs": 1000,
+        "RequestCommand": "W",
         "Output": { "Transport": "sqs", "QueueUrl": "https://sqs.us-east-1.amazonaws.com/123/cloudprint-shipping-pc-01-scale-shipping" }
+      },
+      {
+        "Name": "cubiscan",
+        "Type": "tcp-raw",
+        "Host": "10.1.100.100", "Port": 1050,
+        "FrameMode": "delimited", "FrameStart": "<STX>", "FrameEnd": "<ETX>",
+        "InitCommands": [ "<STX>T<ETX>" ],
+        "Output": { "Transport": "sqs", "QueueUrl": "https://sqs.us-east-1.amazonaws.com/123/cloudprint-shipping-pc-01-cubiscan" }
       },
       {
         "Name": "scale-counter",
         "Type": "hid-scale",
-        "Vid": 2338,
-        "Pid": 24613,
-        "PollMode": "stream",
+        "Vid": 2919, "Pid": 21854,
         "Output": { "Transport": "http", "WebhookUrl": "https://wms.example.com/api/readings", "HeaderName": "X-Api-Key", "HeaderValue": "..." }
       }
     ]
@@ -422,24 +426,32 @@ Add a `Devices` array under `CloudPrint`. See [`samples/appsettings.sample.json`
 
 | Field | Applies to | Description |
 |---|---|---|
-| `Name` | all | Unique device id; used as `deviceId` and the log tag. Required. |
-| `Type` | all | `serial-scale`, `hid-scale`, `serial-raw`, or `hid-raw`. |
+| `Name` | all | Unique device id; used as `deviceId`, as the command target, and the log tag. Required. |
+| `Type` | all | `serial-raw`, `serial-scale`, `hid-raw`, `hid-scale`, `tcp-raw`, `tcp-scale`. `*-raw` forwards every frame verbatim (start here); `*-scale` also tries to parse a weight. |
 | `Station` | all | Per-device workstation id override (top-level `Station` is the default; blank → machine name). |
-| `Protocol` | serial | Serial parser selector (default `mt-sics`; tolerant of common A&D/Ohaus/MT-SICS ASCII formats). |
-| `ComPort`, `BaudRate`, `Parity`, `DataBits`, `StopBits` | serial | Port settings (defaults 9600/None/8/1). |
-| `LineEnding` | serial | Frame terminator: `crlf`, `lf`, `cr`, or a literal string (default `crlf`). |
-| `Encoding` | serial | `ascii` (default) or `utf8`. |
-| `RequestCommand` | serial | Command sent each cycle in `request`/`interval` mode (e.g. MT-SICS `S`). |
-| `InitCommands` | serial | Commands sent once on connect (e.g. `Z` to zero/tare). |
-| `Vid`, `Pid` | hid | USB vendor/product id (decimal). Find them with `cloudprint list-devices`. |
+| `ComPort` | serial | `COM3`, or `auto` to find the port by `Vid`/`Pid` (survives COM renumbering; `auto:SERIAL` pins a specific adapter). |
+| `BaudRate`, `Parity`, `DataBits`, `StopBits`, `DtrEnable`, `RtsEnable` | serial | Port settings (defaults 9600/None/8/1, DTR/RTS off). |
+| `Host`, `Port`, `ConnectTimeoutMs` | tcp | The device is the TCP server (Cubiscan default port 1050; iDimension user-set). |
+| `FrameMode` | serial, tcp | `line` (default; frames end with `LineEnding`, which is stripped), `delimited` (`FrameStart`..`FrameEnd`, e.g. `<STX>`..`<ETX>`, delimiters kept), or `idle` (discovery: whatever arrives is one frame after `IdleGapMs` of silence). |
+| `LineEnding` | serial, tcp | `crlf` (default), `lf`, `cr`, or an escaped literal. Also the default command terminator. |
+| `FrameStart`, `FrameEnd`, `IdleGapMs`, `MaxFrameBytes`, `ReadTimeoutMs` | serial, tcp | Framing details (defaults: none, none, 150, 4096, 2000). |
+| `Encoding` | serial, tcp | `ascii` (default), `utf8`, or `latin1` (byte-for-byte text). `rawHex` is always lossless regardless. |
+| `RequestCommand` | serial, tcp | Command sent each cycle in `request`/`interval` mode. Escapes allowed: `<STX>M<ETX>`, `\x02`, `<ENQ>`, `\r`. |
+| `InitCommands` | serial, tcp | Commands sent once on connect (e.g. `Z` to zero, `<STX>T<ETX>` to ping a Cubiscan). |
+| `CommandTerminator` | serial, tcp | Appended to every command: omitted = same as `LineEnding`; `none` = nothing (bare `W` for Toledo scales); or an escaped literal. |
+| `Vid`, `Pid` | hid, serial `auto` | USB vendor/product id (decimal). Find them with `cloudprint list-devices`. |
 | `Hid*Offset` / `HidReportId` / `HidWeightSize` | hid | Optional manual report-layout overrides for non-conformant HID scales. |
 | `Pattern` | raw | Regex with named groups `value`, `unit`, `stable` for `*-raw` passthrough. Omit to forward the raw frame only. |
 | `PollMode` | all | `stream` (read continuously), `request`, or `interval` (default `stream`). |
 | `PollIntervalMs` | all | Poll cadence for request/interval modes (top-level `DevicePollIntervalMs` is the default). |
-| `StableOnly` | all | Publish only readings the device marks stable (top-level `DeviceStableOnly` is the default; `true`). |
+| `StableOnly` | all | Publish only readings the device marks stable (top-level `DeviceStableOnly` is the default; `true`). Raw frames count as stable. |
+| `HeartbeatSeconds` | all | Re-publish an unchanged reading every N s so the cloud can tell "still 2.5 kg" from silence (top-level `DeviceHeartbeatSeconds`; 0 = off). |
+| `StaleAfterSeconds` | all | Publish a `stale` event after N s without any data (top-level `DeviceStaleAfterSeconds`; 0 = off). |
 | `Output.Transport` | all | `sqs` or `http` — chosen per device. |
 | `Output.QueueUrl` | sqs | Target SQS queue (requires `sqs:SendMessage`; a `cloudprint-*` name is already in IAM scope). |
 | `Output.WebhookUrl`, `Output.HeaderName`, `Output.HeaderValue` | http | HTTPS webhook (validated for SSRF) and optional auth header. |
+
+Top-level `DeviceCommandQueueUrl` names one SQS queue per station for cloud → device commands (below).
 
 ### Reading format
 
@@ -450,36 +462,63 @@ Each reading is published as JSON:
   "readingId": "8a1f...",
   "station": "shipping-pc-01",
   "host": "SHIPPING-PC-01",
-  "deviceId": "scale-shipping",
-  "deviceType": "serial-scale",
-  "source": { "connection": "serial", "port": "COM3" },
-  "timestamp": "2026-06-06T17:55:05.123Z",
-  "value": 2.5,
-  "unit": "kg",
+  "deviceId": "cubiscan",
+  "deviceType": "tcp-raw",
+  "source": { "connection": "tcp", "host": "10.1.100.100", "tcpPort": 1050 },
+  "timestamp": "2026-08-15T17:55:05.123Z",
+  "value": null,
+  "unit": null,
   "stable": true,
   "status": "ok",
-  "raw": "ST,+00002.50 kg"
+  "raw": "\u0002MAH000000,L009.8,W007.2,H003.5,E,K001.25,D000.00,E,F0138,D\u0003",
+  "rawHex": "024D414830303030303...03",
+  "metadata": { "commandId": "c-42" }
 }
 ```
 
-`status` is one of `ok | motion | overload | underload | zero | error`. HID readings carry `source.vid`/`source.pid`/`source.product`; raw passthrough readings populate `raw` with `value` left null when no `Pattern` matches.
+`raw` is the frame as text (control characters JSON-escaped); `rawHex` is the exact bytes. `status` is `ok | motion | overload | underload | zero | error | unparsed` for measurements (`unparsed` = a `*-scale` parser made nothing of the frame; it is forwarded anyway), or a lifecycle event: `connected` (metadata carries HID product/manufacturer/serial/usages/report descriptor, COM friendly name/VID/PID, or TCP endpoint), `disconnected`, `stale`, `command-sent`, `command-failed`. HID readings carry `source.vid`/`source.pid`/`source.product`; readings that arrive within a command's reply window carry `metadata.commandId`.
+
+### Cloud → device commands
+
+Send a JSON message to the station's `DeviceCommandQueueUrl`:
+
+```json
+{ "id": "c-42", "device": "cubiscan", "command": "<STX>M<ETX>", "replyWindowMs": 8000, "metadata": { "orderId": "SO-1001" } }
+```
+
+| Field | Description |
+|---|---|
+| `device` (or `deviceId`) | Target `Devices[].Name`. Unknown names are logged and dropped. |
+| `command` | Text with the same escapes as config; the device's command terminator is appended unless `terminator` says otherwise (`"none"`, or an escaped literal). |
+| `bytesBase64` | Exact bytes instead of `command` (HID output reports, binary protocols). |
+| `replyWindowMs` | Frames arriving within this window (default 5000) get `metadata.commandId` = `id`. |
+| `metadata` | Copied onto the `command-sent` event so the cloud can correlate. |
+
+The service publishes `command-sent` (with the bytes actually written) or `command-failed` (device not connected, invalid message) on the device's normal output. Commands run as they arrive — they are not queued behind a blocked read.
 
 ### Supported devices & drivers
 
 | Type | Connection | Driver |
 |---|---|---|
-| `serial-scale` | RS-232 / USB-CDC virtual COM port (Mettler Toledo MT-SICS, A&D, Ohaus, CAS) | Requires the vendor **VCP driver** (FTDI/Prolific/CP210x) installed so a COM port appears. |
-| `hid-scale` | USB HID POS scale (HID usage page `0x8D`) | **No driver** — uses the in-box Windows HID driver. Must not be exclusively claimed by another app (e.g. a POS/`ClaimedScale` app); if it is, CloudPrint logs the failure and retries. |
-| `serial-raw` / `hid-raw` | Any serial / HID device | Same driver rules as above; forwards frames with optional regex extraction. |
+| `serial-raw` / `serial-scale` | RS-232 / USB virtual COM port. Most "USB" bench scales (Brecknell, Detecto, Ohaus, Mettler PS/BC in serial mode) and Cubiscans over serial/USB. | Vendor **VCP driver** where needed (FTDI and CDC-ACM install themselves; CP210x/CH340 may need the vendor installer; Prolific clones fail after Windows updates). |
+| `hid-scale` / `hid-raw` | USB HID POS scale (usage page `0x8D`): Fairbanks Ultegra, Mettler PS/BC in HIDPOS mode, DYMO, Stamps.com/Endicia, Rice Lake BenchPro. | **No driver** — in-box Windows HID. Composite devices: the scale collection is preferred automatically. Must not be exclusively claimed by another app. |
+| `tcp-raw` / `tcp-scale` | Device that listens on TCP: Cubiscan (`:1050`), Rice Lake iDimension (Cubiscan or QubeVu protocol), Mettler TLD250, serial-device servers. | None. |
 
-Hot-plug is handled by reconnect-with-backoff (the service polls and re-opens the device), so unplug/replug recovers automatically.
+Hot-plug is handled by reconnect-with-backoff (the service polls and re-opens the device), so unplug/replug recovers automatically. Keyboard-wedge devices (a scale that "types") cannot be read by a Windows service — switch the device to HID-POS, serial, or TCP.
+
+### Discovery recipe (unknown device)
+
+1. `cloudprint list-devices` — COM ports with their USB identity/friendly name and HID devices with usage pages (`[HID scale]` marks the weighing-device usage page).
+2. Add the device as `serial-raw` with `FrameMode: idle` (or `hid-raw`, or `tcp-raw`), no request command; watch the `connected` event and raw frames arrive on the queue.
+3. Once the framing is obvious, switch to `line`/`delimited` and add the request command; parse in the cloud, or set `Pattern`.
 
 ### Finding devices
 
-On the target machine, list connected COM ports and HID devices (VID/PID/product) to fill in the config:
+On the target machine, list connected COM ports and HID devices to fill in the config:
 
 ```
-cloudprint list-devices
+cloudprint list-devices          # human-readable
+cloudprint list-devices --json   # what the configurator uses
 ```
 
 ## Security

@@ -1,0 +1,63 @@
+name: UI screenshots
+
+# Renders the configurator's forms to PNGs on a Windows runner so the WinForms UI can be reviewed without
+# a Windows box (nobody on the dev side has one). Runs on every branch push and on demand; the pictures
+# and the installer for that commit are uploaded as artifacts.
+on:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build configurator (WinForms)
+        run: dotnet build src/CloudPrint.Configurator/CloudPrint.Configurator.csproj -c Release /warnaserror
+
+      - name: Render screenshots
+        run: |
+          $exe = Get-ChildItem -Recurse -Path src/CloudPrint.Configurator/bin/Release -Filter CloudPrint.Configurator.exe | Select-Object -First 1
+          & $exe.FullName --screenshot out/screenshots
+          Get-Content out/screenshots/screenshots.log
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-screenshots
+          path: out/screenshots/
+          retention-days: 7
+
+      # Same installer the release job would produce, so the branch can be installed on a test box.
+      - name: Publish service
+        run: >
+          dotnet publish src/CloudPrint.Service/CloudPrint.Service.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o out/service
+
+      - name: Embed service into configurator
+        run: Copy-Item out/service/CloudPrint.Service.exe src/CloudPrint.Configurator/CloudPrint.Service.exe -Force
+
+      - name: Publish one-file installer
+        run: >
+          dotnet publish src/CloudPrint.Configurator/CloudPrint.Configurator.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o out/app
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: CloudPrint-Setup-branch
+          path: out/app/CloudPrint.Configurator.exe
+          retention-days: 7

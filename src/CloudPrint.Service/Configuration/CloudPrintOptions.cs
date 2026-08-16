@@ -46,6 +46,9 @@ public class CloudPrintOptions
     public string Station { get; set; } = string.Empty;       // logical workstation id; blank => machine name
     public int DevicePollIntervalMs { get; set; } = 500;      // global default
     public bool DeviceStableOnly { get; set; } = true;        // global default
+    public int DeviceHeartbeatSeconds { get; set; } = 0;      // re-publish an unchanged reading every N s (0 = off)
+    public int DeviceStaleAfterSeconds { get; set; } = 0;     // publish a "stale" event after N s without data (0 = off)
+    public string DeviceCommandQueueUrl { get; set; } = string.Empty; // SQS queue of cloud→device commands (empty = off)
     public List<DeviceConfig> Devices { get; set; } = new();
 
     /// <summary>
@@ -88,15 +91,23 @@ public class CloudPrintOptions
         Type: string.IsNullOrWhiteSpace(d.Type) ? "serial-scale" : d.Type.Trim().ToLowerInvariant(),
         Protocol: string.IsNullOrWhiteSpace(d.Protocol) ? "mt-sics" : d.Protocol!.Trim().ToLowerInvariant(),
         Station: !string.IsNullOrWhiteSpace(d.Station) ? d.Station! : EffectiveStation,
+        Host: d.Host?.Trim(),
+        Port: d.Port ?? 0,
+        ConnectTimeout: TimeSpan.FromMilliseconds(d.ConnectTimeoutMs is > 0 ? d.ConnectTimeoutMs.Value : 5000),
         ComPort: d.ComPort,
         BaudRate: d.BaudRate is > 0 ? d.BaudRate.Value : 9600,
         Parity: string.IsNullOrWhiteSpace(d.Parity) ? "None" : d.Parity!,
         DataBits: d.DataBits is > 0 ? d.DataBits.Value : 8,
         StopBits: d.StopBits is > 0 ? d.StopBits.Value : 1,
+        DtrEnable: d.DtrEnable ?? false,
+        RtsEnable: d.RtsEnable ?? false,
         LineEnding: string.IsNullOrWhiteSpace(d.LineEnding) ? "crlf" : d.LineEnding!.Trim().ToLowerInvariant(),
         Encoding: string.IsNullOrWhiteSpace(d.Encoding) ? "ascii" : d.Encoding!.Trim().ToLowerInvariant(),
         RequestCommand: d.RequestCommand,
         InitCommands: d.InitCommands ?? new List<string>(),
+        CommandTerminator: d.CommandTerminator,
+        Framing: ResolveFraming(d),
+        ReadTimeout: TimeSpan.FromMilliseconds(d.ReadTimeoutMs is > 0 ? d.ReadTimeoutMs.Value : 2000),
         Vid: d.Vid,
         Pid: d.Pid,
         Hid: new HidOverrides(d.HidReportId, d.HidStatusOffset, d.HidUnitOffset, d.HidExponentOffset, d.HidWeightOffset, d.HidWeightSize),
@@ -104,7 +115,48 @@ public class CloudPrintOptions
         PollMode: string.IsNullOrWhiteSpace(d.PollMode) ? "stream" : d.PollMode!.Trim().ToLowerInvariant(),
         PollIntervalMs: d.PollIntervalMs is > 0 ? d.PollIntervalMs.Value : DevicePollIntervalMs,
         StableOnly: d.StableOnly ?? DeviceStableOnly,
+        Heartbeat: SecondsOrOff(d.HeartbeatSeconds ?? DeviceHeartbeatSeconds),
+        StaleAfter: SecondsOrOff(d.StaleAfterSeconds ?? DeviceStaleAfterSeconds),
         Output: ResolveOutput(d.Output));
+
+    private static TimeSpan? SecondsOrOff(int seconds) => seconds > 0 ? TimeSpan.FromSeconds(seconds) : null;
+
+    /// <summary>
+    /// Resolves the framing options for serial/tcp devices. Line mode keeps the historical LineEnding
+    /// semantics (crlf/lf/cr or an escaped literal); delimited and idle modes are the new byte-level controls.
+    /// </summary>
+    private static CloudPrint.Service.Devices.Framing.FramingOptions ResolveFraming(DeviceConfig d)
+    {
+        var mode = (d.FrameMode ?? "line").Trim().ToLowerInvariant() switch
+        {
+            "delimited" or "stxetx" => CloudPrint.Service.Devices.Framing.FrameMode.Delimited,
+            "idle" or "gap" or "discovery" => CloudPrint.Service.Devices.Framing.FrameMode.Idle,
+            _ => CloudPrint.Service.Devices.Framing.FrameMode.Line
+        };
+        var terminator = LineEndingBytes(d.LineEnding);
+        var start = Bytes(CloudPrint.Service.Devices.Framing.ControlEscapes.Unescape(d.FrameStart));
+        var end = Bytes(CloudPrint.Service.Devices.Framing.ControlEscapes.Unescape(d.FrameEnd));
+        if (mode == CloudPrint.Service.Devices.Framing.FrameMode.Delimited && end.Length == 0)
+            end = terminator; // delimited without an explicit end: fall back to the line ending
+        return new CloudPrint.Service.Devices.Framing.FramingOptions(
+            mode, terminator, start, end,
+            TimeSpan.FromMilliseconds(d.IdleGapMs is > 0 ? d.IdleGapMs.Value : 150),
+            d.MaxFrameBytes is > 0 ? d.MaxFrameBytes.Value : 4096);
+    }
+
+    /// <summary>crlf | lf | cr | escaped literal → bytes. Shared by framing and the default command terminator.</summary>
+    public static string LineEndingText(string? lineEnding) => (lineEnding ?? "crlf").Trim().ToLowerInvariant() switch
+    {
+        "" or "crlf" => "\r\n",
+        "lf" => "\n",
+        "cr" => "\r",
+        "none" => "",
+        _ => CloudPrint.Service.Devices.Framing.ControlEscapes.Unescape(lineEnding!.Trim())
+    };
+
+    public static byte[] LineEndingBytes(string? lineEnding) => Bytes(LineEndingText(lineEnding));
+
+    private static byte[] Bytes(string s) => System.Text.Encoding.Latin1.GetBytes(s);
 
     private static ResolvedOutput ResolveOutput(DeviceOutputConfig? o) => new(
         Transport: string.IsNullOrWhiteSpace(o?.Transport) ? "sqs" : o!.Transport.Trim().ToLowerInvariant(),
@@ -132,9 +184,14 @@ public record ResolvedLane(
 public class DeviceConfig
 {
     public string Name { get; set; } = string.Empty;        // unique id, used as DeviceId and log tag
-    public string Type { get; set; } = string.Empty;        // serial-scale | hid-scale | serial-raw | hid-raw
+    public string Type { get; set; } = string.Empty;        // serial-scale | serial-raw | hid-scale | hid-raw | tcp-scale | tcp-raw
     public string? Protocol { get; set; }                   // serial parser selector (default mt-sics)
     public string? Station { get; set; }                    // per-device station override
+
+    // TCP client (device is the server, e.g. Cubiscan :1050, iDimension)
+    public string? Host { get; set; }
+    public int? Port { get; set; }
+    public int? ConnectTimeoutMs { get; set; }              // default 5000
 
     // Serial / USB-CDC
     public string? ComPort { get; set; }                    // e.g. "COM3"
@@ -142,10 +199,21 @@ public class DeviceConfig
     public string? Parity { get; set; }                     // None | Even | Odd
     public int? DataBits { get; set; }                      // default 8
     public int? StopBits { get; set; }                      // default 1
-    public string? LineEnding { get; set; }                 // crlf | lf | cr | literal (default crlf)
-    public string? Encoding { get; set; }                   // ascii | utf8 (default ascii)
-    public string? RequestCommand { get; set; }             // poll command for request/interval mode
+    public bool? DtrEnable { get; set; }                    // assert DTR on open (default false)
+    public bool? RtsEnable { get; set; }                    // assert RTS on open (default false)
+    public string? LineEnding { get; set; }                 // crlf | lf | cr | literal/escaped (default crlf)
+    public string? Encoding { get; set; }                   // ascii | utf8 | latin1 (default ascii)
+    public string? RequestCommand { get; set; }             // poll command for request/interval mode (escapes: \x02, <STX>)
     public List<string>? InitCommands { get; set; }         // commands sent on connect (e.g. zero/tare)
+    public string? CommandTerminator { get; set; }          // appended to every command: null = LineEnding, "none" = nothing, else escaped literal
+
+    // Framing (serial + tcp): how the byte stream is cut into frames
+    public string? FrameMode { get; set; }                  // line (default) | delimited | idle
+    public string? FrameStart { get; set; }                 // delimited: optional start sequence, e.g. "<STX>"
+    public string? FrameEnd { get; set; }                   // delimited: end sequence, e.g. "<ETX>"
+    public int? IdleGapMs { get; set; }                     // idle: silence that closes a frame (default 150)
+    public int? MaxFrameBytes { get; set; }                 // safety cap (default 4096)
+    public int? ReadTimeoutMs { get; set; }                 // how long one read cycle waits for data (default 2000)
 
     // HID
     public int? Vid { get; set; }
@@ -164,6 +232,8 @@ public class DeviceConfig
     public string? PollMode { get; set; }                   // stream | request | interval (default stream)
     public int? PollIntervalMs { get; set; }
     public bool? StableOnly { get; set; }
+    public int? HeartbeatSeconds { get; set; }              // per-device override of DeviceHeartbeatSeconds
+    public int? StaleAfterSeconds { get; set; }             // per-device override of DeviceStaleAfterSeconds
 
     public DeviceOutputConfig? Output { get; set; }
 }
@@ -183,15 +253,23 @@ public record ResolvedDevice(
     string Type,
     string Protocol,
     string Station,
+    string? Host,
+    int Port,
+    TimeSpan ConnectTimeout,
     string? ComPort,
     int BaudRate,
     string Parity,
     int DataBits,
     int StopBits,
+    bool DtrEnable,
+    bool RtsEnable,
     string LineEnding,
     string Encoding,
     string? RequestCommand,
     IReadOnlyList<string> InitCommands,
+    string? CommandTerminator,
+    CloudPrint.Service.Devices.Framing.FramingOptions Framing,
+    TimeSpan ReadTimeout,
     int? Vid,
     int? Pid,
     HidOverrides Hid,
@@ -199,7 +277,20 @@ public record ResolvedDevice(
     string PollMode,
     int PollIntervalMs,
     bool StableOnly,
-    ResolvedOutput Output);
+    TimeSpan? Heartbeat,
+    TimeSpan? StaleAfter,
+    ResolvedOutput Output)
+{
+    /// <summary>The bytes appended to every command written to the device (request, init, cloud commands).</summary>
+    public string EffectiveCommandTerminator =>
+        CommandTerminator is null ? CloudPrintOptions.LineEndingText(LineEnding)
+        : CommandTerminator.Trim().Equals("none", StringComparison.OrdinalIgnoreCase) ? string.Empty
+        : CloudPrint.Service.Devices.Framing.ControlEscapes.Unescape(CommandTerminator);
+
+    public bool IsTcp => Type.StartsWith("tcp-", StringComparison.OrdinalIgnoreCase);
+    public bool IsSerial => Type.StartsWith("serial-", StringComparison.OrdinalIgnoreCase);
+    public bool IsHid => Type.StartsWith("hid-", StringComparison.OrdinalIgnoreCase);
+}
 
 /// <summary>Optional per-device HID field-map overrides (byte offsets). Null = use the default layout.</summary>
 public record HidOverrides(

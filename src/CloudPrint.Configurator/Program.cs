@@ -13,6 +13,14 @@ internal static class Program
 
         InstallContext.Initialize();
 
+        // Headless UI review: render every form state to PNGs (see ScreenshotHarness).
+        if (args.Length > 1 && args[0].Equals("--screenshot", StringComparison.OrdinalIgnoreCase))
+        {
+            ApplicationConfiguration.Initialize();
+            Environment.ExitCode = ScreenshotHarness.Run(args[1]);
+            return;
+        }
+
         // Packaged one-file build: lay down the service binary + register before showing the GUI.
         if (InstallContext.Packaged)
         {

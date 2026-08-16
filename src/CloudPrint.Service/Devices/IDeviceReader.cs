@@ -25,4 +25,16 @@ public interface IDeviceReader : IAsyncDisposable
 
     /// <summary>Returns the next reading, or null if nothing was available this cycle.</summary>
     Task<DeviceReading?> ReadAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Discovery facts learned at connect (HID product/serial/usage page/report descriptor, COM friendly
+    /// name, TCP endpoint...). Stamped onto the "connected" event so the cloud can see what it is talking to.
+    /// </summary>
+    IReadOnlyDictionary<string, string> Metadata { get; }
+
+    /// <summary>
+    /// Writes bytes to the device (cloud→device command). Implementations that cannot write throw
+    /// <see cref="NotSupportedException"/>; a dead handle surfaces as <see cref="DeviceConnectionException"/>.
+    /// </summary>
+    Task SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
 }

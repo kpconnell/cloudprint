@@ -1,3 +1,4 @@
+using CloudPrint.Service.Configuration;
 using CloudPrint.Service.Devices;
 using CloudPrint.Service.Publishing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,10 +22,16 @@ public class DeviceForwardingServiceTests
         return reader;
     }
 
+    internal static ResolvedDevice Device(string station = "stn-1", bool stableOnly = true, Action<DeviceConfig>? configure = null)
+    {
+        var config = new DeviceConfig { Name = "dev1", Type = "serial-scale" };
+        configure?.Invoke(config);
+        return new CloudPrintOptions { Station = station, DeviceStableOnly = stableOnly, Devices = { config } }.ResolvedDevices()[0];
+    }
+
     private static DeviceForwardingService Create(IDeviceReader reader, IReadingPublisher publisher,
         string station = "stn-1", bool stableOnly = true) =>
-        new(reader, publisher, station, stableOnly, "device/dev1",
-            NullLogger<DeviceForwardingService>.Instance);
+        new(reader, publisher, Device(station, stableOnly), NullLogger<DeviceForwardingService>.Instance);
 
     [Fact]
     public async Task Publishes_reading_and_stamps_identity()
@@ -72,7 +79,9 @@ public class DeviceForwardingServiceTests
         await Task.Delay(400);
         await service.StopAsync(CancellationToken.None);
 
-        publisher.Verify(p => p.PublishAsync(It.IsAny<DeviceReading>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Only the lifecycle "connected" event may go out — never the unstable measurement.
+        publisher.Verify(p => p.PublishAsync(It.Is<DeviceReading>(r => !r.IsEvent), It.IsAny<CancellationToken>()), Times.Never);
+        publisher.Verify(p => p.PublishAsync(It.Is<DeviceReading>(r => r.Status == "connected"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
