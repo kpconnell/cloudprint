@@ -531,7 +531,7 @@ internal sealed partial class DeviceEditorForm : Form
         _hidGroup.Visible = ConfigDefaults.IsHid(type);
         _tcpGroup.Visible = ConfigDefaults.IsTcp(type);
         _streamGroup.Visible = ConfigDefaults.IsStream(type);
-        _lower.Top = _streamGroup.Visible ? BehaviourTop : StreamTop;
+        _lower.Top = ConfigDefaults.IsStream(type) ? BehaviourTop : StreamTop; // not .Visible: that reads false before Show()
 
         var isRaw = type is ConfigDefaults.DeviceSerialRaw or ConfigDefaults.DeviceTcpRaw;
         _patternLabel.Visible = isRaw && _showAdvanced.Checked;
