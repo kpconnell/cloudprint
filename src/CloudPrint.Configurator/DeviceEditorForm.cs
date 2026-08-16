@@ -193,7 +193,7 @@ internal sealed partial class DeviceEditorForm : Form
         _stopBits.SetBounds(420, 142, 120, 24);
         _stopBits.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var i in ConfigDefaults.StopBitsOptions) _stopBits.Items.Add(i);
-        _serialGroup.Controls.Add(_stopBits);
+        AddInput(_serialGroup, _stopBits);
         MarkAdvanced(stopLabel, _stopBits);
 
         _dtr.Location = new Point(334, 88);
@@ -281,55 +281,55 @@ internal sealed partial class DeviceEditorForm : Form
         _frameMode.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var m in ConfigDefaults.FrameModes) _frameMode.Items.Add(m);
         _frameMode.SelectedIndexChanged += (_, _) => ApplyFrameModeVisibility();
-        g.Controls.Add(_frameMode);
+        AddInput(g, _frameMode);
 
         AddLabel(g, "Line ending", 26, 330);
         _lineEnding.SetBounds(420, 22, 120, 24);
         _lineEnding.DropDownStyle = ComboBoxStyle.DropDown; // editable: crlf/lf/cr or an escaped literal
         foreach (var e in ConfigDefaults.LineEndings.Where(e => e != "literal")) _lineEnding.Items.Add(e);
-        g.Controls.Add(_lineEnding);
+        AddInput(g, _lineEnding);
 
         AddLabel(g, "Frame start", 56);
         _frameStart.SetBounds(150, 52, 160, 24);
         _frameStart.PlaceholderText = "<STX>";
-        g.Controls.Add(_frameStart);
+        AddInput(g, _frameStart);
         AddLabel(g, "Frame end", 56, 330);
         _frameEnd.SetBounds(420, 52, 120, 24);
         _frameEnd.PlaceholderText = "<ETX>";
-        g.Controls.Add(_frameEnd);
+        AddInput(g, _frameEnd);
 
         AddLabel(g, "Idle gap (ms)", 86);
         _idleGap.SetBounds(150, 82, 160, 24);
         _idleGap.Minimum = 10;
         _idleGap.Maximum = 10000;
         _idleGap.Value = ConfigDefaults.DefaultIdleGapMs;
-        g.Controls.Add(_idleGap);
+        AddInput(g, _idleGap);
         var encLabel = AddLabel(g, "Encoding", 86, 330);
         _encoding.SetBounds(420, 82, 120, 24);
         _encoding.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var e in ConfigDefaults.Encodings) _encoding.Items.Add(e);
-        g.Controls.Add(_encoding);
+        AddInput(g, _encoding);
         MarkAdvanced(encLabel, _encoding);
 
         AddLabel(g, "Request cmd", 116);
         _requestCommand.SetBounds(150, 112, 160, 24);
         _requestCommand.PlaceholderText = "e.g. W or <STX>M<ETX>";
-        g.Controls.Add(_requestCommand);
-        var termLabel = AddLabel(g, "Cmd terminator", 116, 330);
+        AddInput(g, _requestCommand);
+        var termLabel = AddLabel(g, "Terminator", 116, 330);
         _commandTerminator.SetBounds(420, 112, 120, 24);
         _commandTerminator.PlaceholderText = ConfigDefaults.CommandTerminatorDefaultLabel;
-        g.Controls.Add(_commandTerminator);
+        AddInput(g, _commandTerminator);
         MarkAdvanced(termLabel, _commandTerminator);
 
         var initLabel = AddLabel(g, "Init commands", 146);
         _initCommands.SetBounds(150, 142, 160, 56);
-        g.Controls.Add(_initCommands);
+        AddInput(g, _initCommands);
         MarkAdvanced(initLabel, _initCommands);
         var protoLabel = AddLabel(g, "Protocol", 146, 330);
         _protocol.SetBounds(420, 142, 120, 24);
         _protocol.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var p in ConfigDefaults.Protocols) _protocol.Items.Add(p);
-        g.Controls.Add(_protocol);
+        AddInput(g, _protocol);
         MarkAdvanced(protoLabel, _protocol);
 
         _patternLabel.Text = "Pattern (regex)";
@@ -337,7 +337,7 @@ internal sealed partial class DeviceEditorForm : Form
         _pattern.SetBounds(150, 206, 390, 24);
         _pattern.PlaceholderText = "optional: named groups value / unit / stable";
         g.Controls.Add(_patternLabel);
-        g.Controls.Add(_pattern);
+        AddInput(g, _pattern);
         MarkAdvanced(_patternLabel, _pattern);
 
         _streamHint.Text = "Escapes: <STX> <ETX> <CR> <LF> <ENQ> or \\x02. Cmd terminator: blank = same as line ending, none = nothing.";
@@ -423,11 +423,20 @@ internal sealed partial class DeviceEditorForm : Form
         CancelButton = cancel;
     }
 
+    // Right-column labels sit at 330 with inputs at 420; the width must stop short of the input because a
+    // label added before its input paints ON TOP of it (WinForms z-order: earlier-added = frontmost).
     private Label AddLabel(Control parent, string text, int top, int left = 16)
     {
-        var label = new Label { Text = text, Left = left, Top = top + 4, Width = 130 };
+        var label = new Label { Text = text, Left = left, Top = top + 4, Width = left >= 300 ? 86 : 130 };
         parent.Controls.Add(label);
         return label;
+    }
+
+    /// <summary>Adds an input and makes sure no earlier-added label can paint over it.</summary>
+    private static void AddInput(Control parent, Control input)
+    {
+        parent.Controls.Add(input);
+        input.BringToFront();
     }
 
     private void FillSerial(ComboBox combo, IEnumerable<int> items)
