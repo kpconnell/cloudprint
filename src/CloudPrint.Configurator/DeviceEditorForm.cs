@@ -67,16 +67,18 @@ internal sealed partial class DeviceEditorForm : Form
     private readonly TextBox _pattern = new();
     private readonly Label _streamHint = new() { Left = 16, Top = 236, Width = 530, Height = 40, ForeColor = Color.DimGray };
 
-    // Behaviour
+    // Everything below the connection/framing groups lives in one panel so it can move up when the
+    // framing group is hidden (HID devices have no byte stream to frame).
     private const int BehaviourTop = StreamTop + StreamHeight + 12;
+    private readonly Panel _lower = new() { Left = 0, Top = BehaviourTop, Width = 600 };
     private readonly ComboBox _pollMode = new();
     private readonly NumericUpDown _pollInterval = new();
     private readonly CheckBox _stableOnly = new() { Text = "Only publish stable readings", AutoSize = true };
     private readonly NumericUpDown _heartbeat = new();
     private readonly NumericUpDown _staleAfter = new();
 
-    // Output
-    private const int OutputTop = BehaviourTop + 96;
+    // Output (tops below are relative to _lower)
+    private const int OutputTop = 96;
     private readonly GroupBox _outputGroup = new() { Text = "Where readings go", Left = 12, Top = OutputTop, Width = 560, Height = 150 };
     private readonly ComboBox _outTransport = new();
     private readonly Label _outSqsHint = new() { Text = "Sent to the cloud (SQS queue auto-created).", Left = 306, Top = 26, Width = 245, ForeColor = Color.DimGray };
@@ -85,6 +87,7 @@ internal sealed partial class DeviceEditorForm : Form
     private readonly TextBox _headerValue = new();
 
     private const int TestTop = OutputTop + 150 + 12;
+    private const int LowerHeight = TestTop + 90;
     private readonly Button _test = new() { Text = "Test (live reading)", Left = 12, Top = TestTop, Width = 160 };
     private readonly Label _reading = new() { Left = 182, Top = TestTop + 2, Width = 400, Height = 40, AutoSize = false, ForeColor = Color.DimGray };
     private bool _previewing;
@@ -95,7 +98,7 @@ internal sealed partial class DeviceEditorForm : Form
     internal static Func<Task<DeviceInventory>>? InventoryOverride { get; set; }
 
     /// <summary>Full un-scrolled height of the dialog (used by the screenshot harness to capture everything).</summary>
-    internal int FullClientHeight => TestTop + 90;
+    internal int FullClientHeight => _lower.Top + LowerHeight;
 
     /// <summary>Screenshot hook: force the type/advanced state after construction.</summary>
     internal void SetState(string type, bool showAdvanced)
@@ -119,7 +122,9 @@ internal sealed partial class DeviceEditorForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(600, Math.Min(TestTop + 90, Screen.PrimaryScreen?.WorkingArea.Height - 80 ?? 900));
+        _lower.Height = LowerHeight;
+        Controls.Add(_lower);
+        ClientSize = new Size(600, Math.Min(BehaviourTop + LowerHeight, Screen.PrimaryScreen?.WorkingArea.Height - 80 ?? 900));
         AutoScroll = true;
 
         BuildTop();
@@ -343,36 +348,36 @@ internal sealed partial class DeviceEditorForm : Form
 
     private void BuildBehaviour()
     {
-        var pollLabel = new Label { Text = "Poll mode", Left = 12, Top = BehaviourTop + 4, Width = 100 };
-        Controls.Add(pollLabel);
-        _pollMode.SetBounds(130, BehaviourTop, 150, 24);
+        var pollLabel = new Label { Text = "Poll mode", Left = 12, Top = 4, Width = 100 };
+        _lower.Controls.Add(pollLabel);
+        _pollMode.SetBounds(130, 0, 150, 24);
         _pollMode.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (var m in ConfigDefaults.PollModes)
             _pollMode.Items.Add(m);
-        Controls.Add(_pollMode);
+        _lower.Controls.Add(_pollMode);
 
-        var intervalLabel = new Label { Text = "Poll interval (ms)", Left = 300, Top = BehaviourTop + 4, Width = 110 };
-        Controls.Add(intervalLabel);
-        _pollInterval.SetBounds(420, BehaviourTop, 100, 24);
+        var intervalLabel = new Label { Text = "Poll interval (ms)", Left = 300, Top = 4, Width = 110 };
+        _lower.Controls.Add(intervalLabel);
+        _pollInterval.SetBounds(420, 0, 100, 24);
         _pollInterval.Minimum = 0;
         _pollInterval.Maximum = 600000;
-        Controls.Add(_pollInterval);
+        _lower.Controls.Add(_pollInterval);
 
-        _stableOnly.Location = new Point(130, BehaviourTop + 32);
-        Controls.Add(_stableOnly);
+        _stableOnly.Location = new Point(130, 32);
+        _lower.Controls.Add(_stableOnly);
 
-        var hbLabel = new Label { Text = "Heartbeat (s)", Left = 12, Top = BehaviourTop + 64, Width = 100 };
-        Controls.Add(hbLabel);
-        _heartbeat.SetBounds(130, BehaviourTop + 60, 100, 24);
+        var hbLabel = new Label { Text = "Heartbeat (s)", Left = 12, Top = 64, Width = 100 };
+        _lower.Controls.Add(hbLabel);
+        _heartbeat.SetBounds(130, 60, 100, 24);
         _heartbeat.Minimum = 0;
         _heartbeat.Maximum = 86400;
-        Controls.Add(_heartbeat);
-        var staleLabel = new Label { Text = "Stale after (s)", Left = 300, Top = BehaviourTop + 64, Width = 110 };
-        Controls.Add(staleLabel);
-        _staleAfter.SetBounds(420, BehaviourTop + 60, 100, 24);
+        _lower.Controls.Add(_heartbeat);
+        var staleLabel = new Label { Text = "Stale after (s)", Left = 300, Top = 64, Width = 110 };
+        _lower.Controls.Add(staleLabel);
+        _staleAfter.SetBounds(420, 60, 100, 24);
         _staleAfter.Minimum = 0;
         _staleAfter.Maximum = 86400;
-        Controls.Add(_staleAfter);
+        _lower.Controls.Add(_staleAfter);
         MarkAdvanced(hbLabel, _heartbeat, staleLabel, _staleAfter);
     }
 
@@ -400,20 +405,20 @@ internal sealed partial class DeviceEditorForm : Form
         _headerValue.SetBounds(150, 112, 390, 24);
         _outputGroup.Controls.Add(_headerValue);
 
-        Controls.Add(_outputGroup);
+        _lower.Controls.Add(_outputGroup);
     }
 
     private void BuildTestAndButtons()
     {
         _test.Click += OnTest;
-        Controls.Add(_test);
-        Controls.Add(_reading);
+        _lower.Controls.Add(_test);
+        _lower.Controls.Add(_reading);
 
         var ok = new Button { Text = "OK", Left = 410, Top = TestTop + 46, Width = 80 };
         var cancel = new Button { Text = "Cancel", Left = 500, Top = TestTop + 46, Width = 80, DialogResult = DialogResult.Cancel };
         ok.Click += (_, _) => OnOk();
-        Controls.Add(ok);
-        Controls.Add(cancel);
+        _lower.Controls.Add(ok);
+        _lower.Controls.Add(cancel);
         AcceptButton = ok;
         CancelButton = cancel;
     }
@@ -526,6 +531,7 @@ internal sealed partial class DeviceEditorForm : Form
         _hidGroup.Visible = ConfigDefaults.IsHid(type);
         _tcpGroup.Visible = ConfigDefaults.IsTcp(type);
         _streamGroup.Visible = ConfigDefaults.IsStream(type);
+        _lower.Top = _streamGroup.Visible ? BehaviourTop : StreamTop;
 
         var isRaw = type is ConfigDefaults.DeviceSerialRaw or ConfigDefaults.DeviceTcpRaw;
         _patternLabel.Visible = isRaw && _showAdvanced.Checked;
@@ -579,6 +585,14 @@ internal sealed partial class DeviceEditorForm : Form
                 _hidPick.Items.Add(new HidChoice(hid));
             if (_hidPick.Items.Count == 0)
                 _hidPick.Items.Add(new HidChoice(null));
+
+            // Pre-select: the device already configured, else the (first) HID scale for a brand-new entry.
+            var current = _hidPick.Items.OfType<HidChoice>()
+                .FirstOrDefault(c => c.Info is { } i && i.Vid == (int)_vid.Value && i.Pid == (int)_pid.Value && (_vid.Value > 0 || _pid.Value > 0));
+            var firstScale = _hidPick.Items.OfType<HidChoice>().FirstOrDefault(c => c.Info is { IsScale: true });
+            var pick = current ?? (_vid.Value == 0 && _pid.Value == 0 ? firstScale : null);
+            if (pick is not null)
+                _hidPick.SelectedItem = pick; // fires OnHidPicked → fills VID/PID
         }
         catch (Exception ex)
         {
