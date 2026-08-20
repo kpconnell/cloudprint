@@ -4,8 +4,10 @@ namespace CloudPrint.Configurator.Core.Config;
 
 /// <summary>
 /// Builds SQS queue names from station/printer/device identifiers:
-/// "cloudprint-{prefix}-{sanitized-name}", lowercased,
-/// non-alphanumeric runs collapsed to hyphens, capped so the "-dlq" suffix fits SQS's 80-char limit.
+/// "cloudprint-{prefix}-{sanitized-name}", strictly lowercase alphanumeric and single
+/// hyphens (runs of anything else collapse to one '-'), capped so the "-dlq" suffix
+/// fits SQS's 80-char limit. <see cref="Sanitize"/> is also applied to queue tag
+/// values — SQS rejects most punctuation there too (e.g. parentheses in printer names).
 /// </summary>
 public static partial class QueueNaming
 {
@@ -27,15 +29,23 @@ public static partial class QueueNaming
     public static string DeadLetter(string queueName) => $"{queueName}-dlq";
 
     /// <summary>The list-queues prefix that matches every queue for a host/station.</summary>
-    public static string PrefixFor(string hostOrStation) => $"{Prefix}-{hostOrStation.ToLowerInvariant()}-";
+    public static string PrefixFor(string hostOrStation) => $"{Prefix}-{Sanitize(hostOrStation)}-";
+
+    /// <summary>
+    /// Lowercase alphanumeric-and-dash form of an identifier: any run of other characters
+    /// becomes a single '-', leading/trailing dashes are trimmed. Safe for both queue
+    /// names and queue tag values.
+    /// </summary>
+    public static string Sanitize(string value) =>
+        NonNameRuns().Replace(value.ToLowerInvariant(), "-").Trim('-');
 
     private static string Build(string prefix, string name)
     {
-        var safeName = NonNameChars().Replace(name, "-").ToLowerInvariant().TrimEnd('-');
-        var result = $"{Prefix}-{prefix.ToLowerInvariant()}-{safeName}";
-        return result.Length > MaxLength ? result[..MaxLength] : result;
+        var parts = new[] { Prefix, Sanitize(prefix), Sanitize(name) }.Where(p => p.Length > 0);
+        var result = string.Join("-", parts);
+        return result.Length > MaxLength ? result[..MaxLength].TrimEnd('-') : result;
     }
 
-    [GeneratedRegex("[^a-zA-Z0-9\\-]")]
-    private static partial Regex NonNameChars();
+    [GeneratedRegex("[^a-z0-9]+")]
+    private static partial Regex NonNameRuns();
 }

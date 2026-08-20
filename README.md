@@ -165,10 +165,10 @@ Each queue is tagged on creation:
 | Tag | Value |
 |---|---|
 | `Application` | `cloudprint` |
-| `Hostname` | `WAREHOUSE-PC1` (raw hostname) |
-| `PrinterName` | `Zebra ZP500` (raw printer name) |
+| `Hostname` | `warehouse-pc1` (sanitized hostname) |
+| `PrinterName` | `zebra-zp500` (sanitized printer name) |
 
-Senders enumerate available printers with `ListQueues(QueueNamePrefix=cloudprint-)` followed by `ListQueueTags` per queue URL. Hostname/printer tags carry the original casing and spaces, since the queue name itself sanitizes those.
+Senders enumerate available printers with `ListQueues(QueueNamePrefix=cloudprint-)` followed by `ListQueueTags` per queue URL. Tag values are sanitized the same way as queue names (lowercase alphanumeric and dashes) — SQS rejects most punctuation in tag values, and printer names like `HP LaserJet (Copy 1)` would otherwise fail queue creation.
 
 #### Queue Naming
 
@@ -179,7 +179,7 @@ Each machine/printer gets its own queue pair:
 | Main | `cloudprint-{hostname}-{printer}` | Print jobs |
 | DLQ | `cloudprint-{hostname}-{printer}-dlq` | Failed jobs (after 5 retries) |
 
-The hostname and printer name are lowercased with non-alphanumeric characters replaced by hyphens. For example, a machine `WAREHOUSE-PC1` with printer `Zebra ZP500` produces:
+The hostname and printer name are lowercased, runs of non-alphanumeric characters collapse to a single hyphen, and leading/trailing hyphens are trimmed. For example, a machine `WAREHOUSE-PC1` with printer `Zebra ZP500` produces:
 - `cloudprint-warehouse-pc1-zebra-zp500`
 - `cloudprint-warehouse-pc1-zebra-zp500-dlq`
 

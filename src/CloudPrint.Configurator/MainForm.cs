@@ -397,8 +397,8 @@ internal sealed class MainForm : Form
                 var url = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
                 {
                     ["Application"] = "cloudprint",
-                    ["Station"] = station,
-                    ["Device"] = device.Name,
+                    ["Station"] = QueueNaming.Sanitize(station),
+                    ["Device"] = QueueNaming.Sanitize(device.Name),
                 });
                 request = new OutputTestRequest
                 {
@@ -565,8 +565,8 @@ internal sealed class MainForm : Form
                 lane.QueueUrl = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
                 {
                     ["Application"] = "cloudprint",
-                    ["Hostname"] = host,
-                    ["PrinterName"] = lane.PrinterName,
+                    ["Hostname"] = QueueNaming.Sanitize(host),
+                    ["PrinterName"] = QueueNaming.Sanitize(lane.PrinterName),
                 });
                 Log("  " + lane.QueueUrl);
             }
@@ -580,8 +580,8 @@ internal sealed class MainForm : Form
             device.Output!.QueueUrl = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
             {
                 ["Application"] = "cloudprint",
-                ["Station"] = station,
-                ["Device"] = device.Name,
+                ["Station"] = QueueNaming.Sanitize(station),
+                ["Device"] = QueueNaming.Sanitize(device.Name),
             });
             Log("  " + device.Output.QueueUrl);
         }
@@ -595,7 +595,7 @@ internal sealed class MainForm : Form
             config.DeviceCommandQueueUrl = await client.CreateQueueAsync(creds, queueName, new Dictionary<string, string>
             {
                 ["Application"] = "cloudprint",
-                ["Station"] = station,
+                ["Station"] = QueueNaming.Sanitize(station),
                 ["Purpose"] = "device-commands",
             });
             Log("  " + config.DeviceCommandQueueUrl);
